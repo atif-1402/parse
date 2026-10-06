@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500">
+
+  <g font-family="JetBrains Mono, Fira Code, monospace" text-anchor="middle">
+
+    <!-- parse -->
+    <text x="600" y="235"
+          font-size="72"
+          font-weight="700"
+          fill="#e6eee9">
+      [ parse ]
+    </text>
+
+    <!-- description -->
+    <text x="600" y="280"
+          font-size="18"
+          fill="#9aa8a1">
+      { messy CLI output → readable information }
+    </text>
+
+  </g>
+
+</svg>

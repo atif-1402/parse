@@ -1,12 +1,16 @@
-# parse
+<p align="center">
+  <img src="assets/header.svg" alt="parse" width="700">
+</p>
 
 Make messy Linux command output readable, without ever breaking your scripts.
+
+<p align="center">
+  <img src="assets/preview.gif" alt="parse demo">
+</p>
 
 Single Go binary. Standard library only. **Linux only** (it wraps `findmnt`, `lsblk`, `ss`, `systemctl`, `journalctl` and friends, which don't exist on macOS).
 
 > **Status: v0.1, early.** Feedback and bug reports welcome. See [Reporting bugs](#reporting-bugs).
-
-<!-- TODO: put a before/after screenshot or GIF here. `git diff` vs `parse git diff -w` is the best one. -->
 
 ```
 parse git diff -w          # old | new, side by side
@@ -202,3 +206,9 @@ Real-world output from different distros is the most useful thing you can send.
 ## License
 
 MIT
+
+## Contributing
+
+Want to add a tool or fix one? See [CONTRIBUTION.md](CONTRIBUTION.md) for
+the ground rules, how to add a tool under `cmd/`, and what `make check`
+expects before a pull request.
