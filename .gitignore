@@ -1,0 +1,14 @@
+# Build output
+/parse
+/bin/
+/dist/
+
+# Go
+*.test
+*.out
+coverage.txt
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
