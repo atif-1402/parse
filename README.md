@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/header.svg" alt="parse" width="700">
+  <img src="assets/header.svg" alt="parse">
 </p>
 
 Make messy Linux command output readable, without ever breaking your scripts.
