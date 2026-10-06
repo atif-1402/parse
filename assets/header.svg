@@ -1,18 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300" viewBox="0 0 1200 500">
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100" viewBox="0 0 1200 500">
 
   <g font-family="JetBrains Mono, Fira Code, monospace" text-anchor="middle">
 
     <!-- parse -->
     <text x="600" y="235"
-          font-size="72"
+          font-size="272"
           font-weight="700"
           fill="#e6eee9">
       [ parse ]
     </text>
 
     <!-- description -->
-    <text x="600" y="280"
-          font-size="18"
+    <text x="600" y="380"
+          font-size="48"
           fill="#9aa8a1">
       { messy CLI output → readable information }
     </text>
@@ -20,3 +20,4 @@
   </g>
 
 </svg>
+
