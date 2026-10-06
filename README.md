@@ -2,8 +2,6 @@
   <img src="assets/header.svg" alt="parse">
 </p>
 
-Make messy Linux command output readable, without ever breaking your scripts.
-
 <p align="center">
   <img src="assets/preview.gif" alt="parse demo">
 </p>
