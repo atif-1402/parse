@@ -2,9 +2,9 @@
   <img src="assets/header.svg" alt="parse">
 </p>
 
-<p align="center">
-  <img src="assets/preview.gif" alt="parse demo">
-</p>
+<!-- <p align="center"> -->
+  <!-- <img src="assets/preview.gif" alt="parse demo"> -->
+<!-- </p> -->
 
 Single Go binary. Standard library only. **Linux only** (it wraps `findmnt`, `lsblk`, `ss`, `systemctl`, `journalctl` and friends, which don't exist on macOS).
 
