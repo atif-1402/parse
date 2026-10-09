@@ -27,13 +27,13 @@ Format output that is hard to read. Leave output that already reads well exactly
 
 ## Install
 
-Requires Go (see `go.mod` for the minimum version).
+Install the latest Release of parse (Requires Go. see `go.mod` for the minimum version).
 
 ```
 go install github.com/atif-1402/parse@latest
 ```
 
-Or from source:
+Or build from source:
 
 ```
 git clone https://github.com/atif-1402/parse
