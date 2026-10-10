@@ -8,7 +8,7 @@
 
 Single Go binary. Standard library only. **Linux only** (it wraps `findmnt`, `lsblk`, `ss`, `systemctl`, `journalctl` and friends, which don't exist on macOS).
 
-> **Status: v0.1, early.** Feedback and bug reports welcome. See [Reporting bugs](#reporting-bugs).
+> **Status: v0.2.0.** Feedback and bug reports welcome. See [Reporting bugs](#reporting-bugs).
 
 ```
 parse git diff -w          # old | new, side by side
@@ -106,7 +106,6 @@ app.py  +3 -2
 5 def other():                          │ 6 def other():
 ```
 
-- Also works piped: `git diff | parse -w`.
 - Opt-in, because it lays out to your terminal width. Under about 27 columns it falls back to one column.
 - Long lines are cut with `…`, not wrapped. Double-width (CJK) characters are counted correctly.
 
