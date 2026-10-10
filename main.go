@@ -26,7 +26,7 @@ Usage:
   <tool> <args> | parse    format output that is piped in
 
 Tools:
-  git systemctl journalctl ps find du findmnt free lsof ip ss lsblk kubectl
+  git systemctl journalctl ps find du findmnt free lsof ip ss lsblk kubectl docker
   (run 'parse -l' to see what parse does for each)
 
 Options:
@@ -46,6 +46,9 @@ Paging:
   Commands that read the keyboard or never end are left alone (git add -p,
   journalctl -f, systemctl watch) so Ctrl-C still reaches them.
   Set PARSE_PAGER or PAGER to choose one, or --no-pager to opt out.
+
+  Mid-pipeline (cmd | parse | other) stdout is not a terminal, so color is off
+  and the bytes pass through unchanged; use --color=always for e.g. less -R.
 `
 
 // version is stamped at build time with -ldflags "-X main.version=..."
@@ -74,6 +77,7 @@ var toolList = []toolInfo{
 	{"ss", "colliding headers split; the process name given its own column"},
 	{"lsblk", "device tree dimmed; wrapped mountpoints indented under their device"},
 	{"kubectl", "experimental: get tables aligned with STATUS tinted; describe keys dimmed, states colored"},
+	{"docker", "ps: names bold, STATE colored with exit codes and uptime"},
 }
 
 // tools are the subcommands parse knows how to run. Anything else is reported
@@ -202,6 +206,8 @@ func run(args []string) int {
 		return cmd.Lsblk(rest[1:])
 	case "kubectl":
 		return cmd.Kubectl(rest[1:])
+	case "docker":
+		return cmd.Docker(rest[1:])
 	case "-l", "--list":
 		fmt.Print(toolListText())
 		return 0

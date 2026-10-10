@@ -12,6 +12,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/atif-1402/parse/cmd/docker"
 	"github.com/atif-1402/parse/cmd/du"
 	"github.com/atif-1402/parse/cmd/find"
 	"github.com/atif-1402/parse/cmd/findmnt"
@@ -51,6 +52,9 @@ func Journalctl(args []string) int { return journalctl.Run(args) }
 
 // Ps implements `parse ps <args>`.
 func Ps(args []string) int { return ps.Run(args) }
+
+// Docker implements `parse docker <args>`.
+func Docker(args []string) int { return docker.Run(args) }
 
 // Find implements `parse find <args>`.
 func Find(args []string) int { return find.Run(args) }
@@ -217,6 +221,8 @@ func NeedsTerminal(name string, args []string) bool {
 		return findmnt.NeedsTerminal(args)
 	case "systemctl":
 		return systemctl.NeedsTerminal(args)
+	case "docker":
+		return docker.NeedsTerminal(args)
 	}
 	return false
 }
@@ -254,6 +260,10 @@ var detectors = []detector{
 	// parse knows prints in capitals — and `df` is the one table a user pipes
 	// next to it, spelled in lower case.
 	{tool: "findmnt", detect: findmnt.Detect, format: func(w io.Writer, sub, text string) { findmnt.Format(w, text) }},
+	// docker's ps heading opens with a "CONTAINER ID" column, two words in one
+	// cell, which no other table parse knows begins with; its inspect JSON is
+	// recognized by keys only docker prints.
+	{tool: "docker", detect: docker.Detect, format: docker.Format},
 	{tool: "ss", detect: ss.Detect, format: func(w io.Writer, sub, text string) { ss.Format(w, text) }},
 	{tool: "ps", detect: ps.Detect, format: func(w io.Writer, sub, text string) { ps.Format(w, text) }},
 	{tool: "find", detect: find.Detect, format: func(w io.Writer, sub, text string) { find.Format(w, text) }},

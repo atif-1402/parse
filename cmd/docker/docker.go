@@ -1,0 +1,300 @@
+// Package docker formats docker output. The first subcommand understood is
+// `docker ps` (and `ps -a`), whose table gets a bold heading, a STATUS tinted
+// by state and a tinted published port. Every other subcommand, including the
+// machine forms, is handed through byte for byte.
+package docker
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"github.com/atif-1402/parse/internal/tool"
+)
+
+const (
+	bold   = tool.Bold
+	dim    = tool.Dim
+	red    = tool.Red
+	green  = tool.Green
+	yellow = tool.Yellow
+	cyan   = tool.Cyan
+)
+
+// Run implements `parse docker <args>`.
+func Run(args []string) int {
+	sub := verb(args)
+	if !reformat(sub, args) {
+		return tool.Passthrough("docker", args)
+	}
+
+	if sub == "ps" && !isPipe() {
+		return runPSDirect(args)
+	}
+
+	text, code, started := tool.Capture("docker", args)
+	if !started {
+		return code
+	}
+	Format(os.Stdout, sub, text)
+	return code
+}
+
+func isPipe() bool {
+	stat, _ := os.Stdin.Stat()
+	return (stat.Mode() & os.ModeCharDevice) == 0
+}
+
+func runPSDirect(args []string) int {
+	dockerArgs := []string{"ps", "--format", "json"}
+	for _, a := range args {
+		if a != "ps" {
+			dockerArgs = append(dockerArgs, a)
+		}
+	}
+	text, code, started := tool.Capture("docker", dockerArgs)
+	if !started {
+		return code
+	}
+
+	var containers []Container
+	dec := json.NewDecoder(strings.NewReader(text))
+	for dec.More() {
+		var raw map[string]interface{}
+		if err := dec.Decode(&raw); err != nil {
+			break
+		}
+		containers = append(containers, NormalizeContainer(raw))
+	}
+
+	containers = SortContainers(containers)
+	output := RenderPS(containers)
+	fmt.Fprint(os.Stdout, output)
+	return code
+}
+
+var managerCommands = map[string]bool{
+	"container": true, "image": true, "network": true, "volume": true,
+	"plugin": true, "node": true, "service": true, "secret": true,
+	"config": true, "context": true, "system": true,
+}
+
+func verb(args []string) string {
+	first := ""
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+		if first == "" {
+			first = a
+			if !managerCommands[a] {
+				return a
+			}
+			continue
+		}
+		return a
+	}
+	return ""
+}
+
+func reformat(sub string, args []string) bool {
+	if sub == "ps" {
+		return !psScriptForm(args)
+	}
+	return false
+}
+
+func psScriptForm(args []string) bool {
+	for _, a := range args {
+		switch {
+		case a == "-q", a == "--quiet", a == "--format", strings.HasPrefix(a, "--format="):
+			return true
+		}
+	}
+	return false
+}
+
+func NeedsTerminal(args []string) bool {
+	switch verb(args) {
+	case "events", "attach", "exec":
+		return true
+	case "logs":
+		return hasFlag(args, "-f") || hasFlag(args, "--follow")
+	case "stats":
+		return !hasFlag(args, "--no-stream")
+	case "run":
+		return interactive(args)
+	}
+	return false
+}
+
+func hasFlag(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
+func interactive(args []string) bool {
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			continue
+		}
+		if strings.HasPrefix(a, "--") {
+			if a == "--interactive" || a == "--tty" {
+				return true
+			}
+			continue
+		}
+		if strings.ContainsAny(a, "it") {
+			return true
+		}
+	}
+	return false
+}
+
+func Detect(text string) string {
+	if _, _, ok := psHeader(strings.Split(text, "\n")); ok {
+		return "ps"
+	}
+	return ""
+}
+
+// formatHook lets tests force a panic inside Format to exercise the recover.
+var formatHook func(sub, text string)
+
+func Format(w io.Writer, sub, text string) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "parse: warning: docker %s formatter panicked: %v\n", sub, r)
+			io.WriteString(w, text)
+		}
+	}()
+	if formatHook != nil {
+		formatHook(sub, text)
+	}
+	switch sub {
+	case "ps":
+		formatPS(w, text)
+	default:
+		io.WriteString(w, text)
+	}
+}
+
+// psHeader locates the docker ps heading. It must be the first non-empty
+// line: a heading found anywhere mid-text (a quoted "CONTAINER ID ... NAMES"
+// line inside a git diff, say) would steal that text from its real formatter.
+func psHeader(lines []string) (int, []int, bool) {
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if strings.Contains(line, "CONTAINER ID") && strings.Contains(line, "NAMES") {
+			starts := dfColumnStarts(line)
+			return i, starts, starts != nil
+		}
+		return -1, nil, false
+	}
+	return -1, nil, false
+}
+
+func formatPS(w io.Writer, text string) {
+	lines := strings.Split(text, "\n")
+	headIdx, starts, ok := psHeader(lines)
+	if !ok {
+		io.WriteString(w, text)
+		return
+	}
+	fields := headerFields(lines[headIdx], starts)
+	var containers []Container
+	for i := headIdx + 1; i < len(lines); i++ {
+		line := lines[i]
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		c := parsePSRow(line, starts, fields)
+		if c.Name != "" {
+			containers = append(containers, c)
+		}
+	}
+	// A heading with no rows under it renders as an empty table, which would
+	// swallow the input. Text that parsed to nothing is text this formatter
+	// does not understand, so it goes back untouched.
+	if len(containers) == 0 && strings.TrimSpace(text) != "" {
+		io.WriteString(w, text)
+		return
+	}
+	containers = SortContainers(containers)
+	output := RenderPS(containers)
+	io.WriteString(w, output)
+}
+
+// dfColumnStarts computes column start positions from a header line.
+// Uses 2+ consecutive spaces as column separators to preserve multi-word headers.
+func dfColumnStarts(header string) []int {
+	var starts []int
+	runes := []rune(header)
+	inCol := false
+	for i, r := range runes {
+		if r != ' ' && !inCol {
+			starts = append(starts, i)
+			inCol = true
+		} else if r == ' ' {
+			// Check if next char is also space (2+ spaces = column separator)
+			if i+1 < len(runes) && runes[i+1] == ' ' {
+				inCol = false
+			}
+		}
+	}
+	return starts
+}
+
+func headerFields(header string, starts []int) []string {
+	var fields []string
+	runes := []rune(header)
+	for i, start := range starts {
+		end := len(runes)
+		if i+1 < len(starts) {
+			end = starts[i+1]
+		}
+		field := strings.TrimSpace(string(runes[start:end]))
+		fields = append(fields, field)
+	}
+	return fields
+}
+
+func cellBounds(runes []rune, starts []int, col int) (int, int) {
+	if col >= len(starts) {
+		return 0, 0
+	}
+	lo := starts[col]
+	hi := len(runes)
+	if col+1 < len(starts) {
+		hi = starts[col+1]
+	}
+	return lo, hi
+}
+
+// columnStarts is an alias for dfColumnStarts for test compatibility.
+func columnStarts(header string) []int {
+	return dfColumnStarts(header)
+}
+
+// labels is an alias for headerFields for test compatibility.
+func labels(header string, starts []int) []string {
+	return headerFields(header, starts)
+}
+
+// indexOf returns the index of val in slice, or -1 if not found.
+func indexOf(slice []string, val string) int {
+	for i, s := range slice {
+		if s == val {
+			return i
+		}
+	}
+	return -1
+}
