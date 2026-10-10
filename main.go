@@ -77,7 +77,7 @@ var toolList = []toolInfo{
 	{"ss", "colliding headers split; the process name given its own column"},
 	{"lsblk", "device tree dimmed; wrapped mountpoints indented under their device"},
 	{"kubectl", "experimental: get tables aligned with STATUS tinted; describe keys dimmed, states colored"},
-	{"docker", "ps: names bold, STATE colored with exit codes and uptime; inspect: sections for state, network, env with secrets masked (--show-secrets reveals)"},
+	{"docker", "ps: names bold, STATE colored with exit codes and uptime; inspect: sections for state, network, env with secrets masked (--show-secrets reveals); system df: size-ordered summary incl build cache, -v caches on one line (--all for rows)"},
 }
 
 // tools are the subcommands parse knows how to run. Anything else is reported

@@ -40,6 +40,39 @@ func Run(args []string) int {
 		return runInspectDirect(args)
 	}
 
+	if sub == "df" {
+		// --all / -a is ours, not docker's: docker system df rejects it.
+		// It means "show the build cache rows" and never reaches docker.
+		var rest []string
+		for _, a := range args {
+			if a == "--all" || a == "-a" {
+				SetDFShowAll(true)
+				defer SetDFShowAll(false)
+				continue
+			}
+			rest = append(rest, a)
+		}
+		args = rest
+		// Summing -v rows double-counts shared layers. The direct path can
+		// afford a second, plain run whose totals are docker's own; the
+		// pipe cannot, and marks its sums with ~ instead.
+		if !isPipe() && dfArgsHaveVerbose(args) {
+			var plainArgs []string
+			for _, a := range args {
+				if a == "-v" || a == "--verbose" {
+					continue
+				}
+				plainArgs = append(plainArgs, a)
+			}
+			if plainText, _, started := tool.Capture("docker", plainArgs); started {
+				if s := dfSummaryFromText(plainText); s != "" {
+					SetDFExactSummary(s)
+					defer SetDFExactSummary("")
+				}
+			}
+		}
+	}
+
 	text, code, started := tool.Capture("docker", args)
 	if !started {
 		return code
@@ -164,6 +197,19 @@ func reformat(sub string, args []string) bool {
 		return !psScriptForm(args)
 	case "inspect":
 		return !inspectScriptForm(args)
+	case "df":
+		return true
+	}
+	return false
+}
+
+// dfArgsHaveVerbose reports whether the args asked for docker system df -v,
+// whose table the formatter then reshapes.
+func dfArgsHaveVerbose(args []string) bool {
+	for _, a := range args {
+		if a == "-v" || a == "--verbose" {
+			return true
+		}
 	}
 	return false
 }
@@ -236,6 +282,9 @@ func Detect(text string) string {
 	if looksLikeInspect(text) {
 		return "inspect"
 	}
+	if looksLikeSystemDF(text) {
+		return "df"
+	}
 	return ""
 }
 
@@ -257,6 +306,8 @@ func Format(w io.Writer, sub, text string) {
 		formatPS(w, text)
 	case "inspect":
 		formatInspect(w, text)
+	case "df":
+		formatSystemDF(w, text)
 	default:
 		io.WriteString(w, text)
 	}
