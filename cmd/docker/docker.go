@@ -138,6 +138,11 @@ func runInspectDirect(args []string) int {
 		return code
 	}
 
+	if out, ok := networkInspectText(text, raw); ok {
+		fmt.Fprint(os.Stdout, out)
+		return code
+	}
+
 	views := NormalizeInspect(raw)
 	applyShowSecrets(views, showSecrets || fromTool)
 	output := RenderInspect(views)
@@ -344,7 +349,8 @@ func looksLikeInspect(text string) bool {
 		return false
 	}
 	first := arr[0]
-	return hasAllKeys(first, "Id", "State", "Config")
+	return hasAllKeys(first, "Id", "State", "Config") ||
+		hasAllKeys(first, "Driver", "IPAM")
 }
 
 func hasAllKeys(m map[string]interface{}, keys ...string) bool {
@@ -391,6 +397,10 @@ func formatInspect(w io.Writer, text string) {
 	var raw []map[string]interface{}
 	if err := json.Unmarshal([]byte(text), &raw); err != nil {
 		io.WriteString(w, text)
+		return
+	}
+	if out, ok := networkInspectText(text, raw); ok {
+		io.WriteString(w, out)
 		return
 	}
 	views := NormalizeInspect(raw)
