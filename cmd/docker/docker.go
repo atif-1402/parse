@@ -1,7 +1,9 @@
-// Package docker formats docker output. The first subcommand understood is
+// Package docker formats docker output. Two subcommands are understood so far:
 // `docker ps` (and `ps -a`), whose table gets a bold heading, a STATUS tinted
-// by state and a tinted published port. Every other subcommand, including the
-// machine forms, is handed through byte for byte.
+// by state and a tinted published port; and `docker inspect`, whose JSON gets
+// colored keys, values and a few state-aware fields. Every other subcommand,
+// including the machine forms of either and the streaming of `docker logs -f`,
+// is handed through byte for byte.
 package docker
 
 import (
@@ -32,6 +34,10 @@ func Run(args []string) int {
 
 	if sub == "ps" && !isPipe() {
 		return runPSDirect(args)
+	}
+
+	if sub == "inspect" && !isPipe() {
+		return runInspectDirect(args)
 	}
 
 	text, code, started := tool.Capture("docker", args)
@@ -75,6 +81,59 @@ func runPSDirect(args []string) int {
 	return code
 }
 
+func runInspectDirect(args []string) int {
+	dockerArgs := []string{"inspect"}
+	fromTool := false
+	for _, a := range args {
+		switch {
+		case a == "inspect":
+			// skip the subcommand itself
+		case a == "--show-secrets":
+			fromTool = true
+		default:
+			dockerArgs = append(dockerArgs, a)
+		}
+	}
+	text, code, started := tool.Capture("docker", dockerArgs)
+	if !started {
+		return code
+	}
+
+	var raw []map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &raw); err != nil {
+		fmt.Fprint(os.Stdout, text)
+		return code
+	}
+
+	views := NormalizeInspect(raw)
+	applyShowSecrets(views, showSecrets || fromTool)
+	output := RenderInspect(views)
+	if output == "" {
+		output = text
+	}
+	fmt.Fprint(os.Stdout, output)
+	return code
+}
+
+// showSecrets is the CLI's --show-secrets, set once by cmd.SetShowSecrets
+// before any formatting. It reaches the piped path through Format; the direct
+// path also accepts the flag after `inspect`, where it belongs to docker.
+var showSecrets bool
+
+// SetShowSecrets records whether real env values must be shown. Called once
+// from main via cmd.SetShowSecrets.
+func SetShowSecrets(v bool) { showSecrets = v }
+
+// applyShowSecrets flips every view to render real values instead of masks.
+func applyShowSecrets(views []InspectView, show bool) {
+	if !show {
+		return
+	}
+	for i := range views {
+		views[i].Env.ShowSecrets = true
+	}
+}
+
 var managerCommands = map[string]bool{
 	"container": true, "image": true, "network": true, "volume": true,
 	"plugin": true, "node": true, "service": true, "secret": true,
@@ -100,8 +159,11 @@ func verb(args []string) string {
 }
 
 func reformat(sub string, args []string) bool {
-	if sub == "ps" {
+	switch sub {
+	case "ps":
 		return !psScriptForm(args)
+	case "inspect":
+		return !inspectScriptForm(args)
 	}
 	return false
 }
@@ -110,6 +172,16 @@ func psScriptForm(args []string) bool {
 	for _, a := range args {
 		switch {
 		case a == "-q", a == "--quiet", a == "--format", strings.HasPrefix(a, "--format="):
+			return true
+		}
+	}
+	return false
+}
+
+func inspectScriptForm(args []string) bool {
+	for _, a := range args {
+		switch {
+		case a == "-f", a == "--format", strings.HasPrefix(a, "--format="):
 			return true
 		}
 	}
@@ -161,6 +233,9 @@ func Detect(text string) string {
 	if _, _, ok := psHeader(strings.Split(text, "\n")); ok {
 		return "ps"
 	}
+	if looksLikeInspect(text) {
+		return "inspect"
+	}
 	return ""
 }
 
@@ -180,6 +255,8 @@ func Format(w io.Writer, sub, text string) {
 	switch sub {
 	case "ps":
 		formatPS(w, text)
+	case "inspect":
+		formatInspect(w, text)
 	default:
 		io.WriteString(w, text)
 	}
@@ -200,6 +277,32 @@ func psHeader(lines []string) (int, []int, bool) {
 		return -1, nil, false
 	}
 	return -1, nil, false
+}
+
+// looksLikeInspect claims only JSON that is an array of objects shaped like
+// `docker inspect` output: containers (Id, State, Config) or networks
+// (Driver, IPAM). Anything else — ss -o json, ip -j, kubectl — passes
+// through untouched.
+func looksLikeInspect(text string) bool {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "[") {
+		return false
+	}
+	var arr []map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &arr); err != nil || len(arr) == 0 {
+		return false
+	}
+	first := arr[0]
+	return hasAllKeys(first, "Id", "State", "Config")
+}
+
+func hasAllKeys(m map[string]interface{}, keys ...string) bool {
+	for _, k := range keys {
+		if _, ok := m[k]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func formatPS(w io.Writer, text string) {
@@ -230,6 +333,22 @@ func formatPS(w io.Writer, text string) {
 	}
 	containers = SortContainers(containers)
 	output := RenderPS(containers)
+	io.WriteString(w, output)
+}
+
+func formatInspect(w io.Writer, text string) {
+	var raw []map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &raw); err != nil {
+		io.WriteString(w, text)
+		return
+	}
+	views := NormalizeInspect(raw)
+	applyShowSecrets(views, showSecrets)
+	output := RenderInspect(views)
+	if output == "" {
+		io.WriteString(w, text)
+		return
+	}
 	io.WriteString(w, output)
 }
 

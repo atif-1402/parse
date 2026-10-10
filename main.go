@@ -77,7 +77,7 @@ var toolList = []toolInfo{
 	{"ss", "colliding headers split; the process name given its own column"},
 	{"lsblk", "device tree dimmed; wrapped mountpoints indented under their device"},
 	{"kubectl", "experimental: get tables aligned with STATUS tinted; describe keys dimmed, states colored"},
-	{"docker", "ps: names bold, STATE colored with exit codes and uptime"},
+	{"docker", "ps: names bold, STATE colored with exit codes and uptime; inspect: sections for state, network, env with secrets masked (--show-secrets reveals)"},
 }
 
 // tools are the subcommands parse knows how to run. Anything else is reported
@@ -150,6 +150,7 @@ func run(args []string) int {
 	}
 	colorEnabled = opts.color()
 	cmd.SetHooks(paint, printTable)
+	cmd.SetShowSecrets(opts.showSecrets)
 	// The two-column diff is the one thing parse prints that has to know how
 	// much room it has, so it is measured once here.
 	git.SetWidth(tool.TerminalWidth())
@@ -233,6 +234,7 @@ type options struct {
 	showList    bool
 	sideBySide  bool
 	noPager     bool
+	showSecrets bool
 }
 
 // color decides whether to emit ANSI codes. "auto" keeps the friendly
@@ -288,6 +290,13 @@ func parseArgs(args []string) (options, []string, error) {
 			// before a tool is named; after that `--no-pager` is the tool's, and
 			// shouldPage reads it from the tool's own arguments anyway.
 			o.noPager = true
+		case a == "--show-secrets" && len(rest) == 0:
+			// Docker's inspect masks env values by default; this reveals them.
+			// Claimed before a tool is named, like the other parse flags, so
+			// `docker inspect x | parse --show-secrets` works. After a tool
+			// name it belongs to the tool (`parse docker inspect x
+			// --show-secrets`), and docker.Run strips it there.
+			o.showSecrets = true
 		case (a == "-v" || a == "--version") && len(rest) == 0:
 			// Only claim the version flag before a tool is named. After that
 			// it belongs to the tool: `parse git --version` must ask git.

@@ -87,6 +87,13 @@ func SetHooks(paint func(color, s string) string, printTable func(w io.Writer, h
 	tool.PrintTable = printTable
 }
 
+// SetShowSecrets forwards the CLI's --show-secrets to the docker formatter,
+// the same way SetHooks forwards the CLI's color function. main calls it once
+// at startup, before either the direct or the piped path formats anything, so
+// `parse --show-secrets docker inspect x` and `docker inspect x | parse
+// --show-secrets` reach the same renderer state.
+func SetShowSecrets(v bool) { docker.SetShowSecrets(v) }
+
 // Pipe formats piped output from any supported tool, guessing which one
 // produced it.
 //

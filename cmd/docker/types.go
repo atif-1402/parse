@@ -149,3 +149,97 @@ func (p Port) String() string {
 	}
 	return fmt.Sprintf("%s/%s", p.Private, p.Type)
 }
+
+// InspectView is the semantic model for rendering docker inspect.
+type InspectView struct {
+	Identity  IdentitySection
+	Command   string
+	State     StateSection
+	Network   NetworkSection
+	Ports     PortsSection
+	Mounts    []MountSection
+	Env       EnvSection
+	Resources ResourcesSection
+	Restart   RestartSection
+	Health    HealthSection
+	Security  SecuritySection
+}
+
+type IdentitySection struct {
+	Name     string
+	Image    string // full image ref: "nginx", "alpine:3.19"
+	ImageTag string // just the tag or repo for ps table
+	ShortID  string
+}
+
+type StateSection struct {
+	Status       string
+	RunningFor   string
+	RestartCount int
+	OOMKilled    bool
+	ExitCode     int
+	Pid          int
+	Paused       bool
+	Restarting   bool
+	Dead         bool
+}
+
+type NetworkSection struct {
+	NetworkName string
+	IP          string
+	Gateway     string
+	Driver      string
+}
+
+type PortsSection struct {
+	Published []string
+	Exposed   []string
+}
+
+type MountSection struct {
+	Type        string // bind, volume, tmpfs
+	Source      string
+	Destination string
+	Mode        string
+	RW          bool
+	Propagation string
+	Missing     bool // source path doesn't exist
+}
+
+type EnvSection struct {
+	Count       int
+	Vars        map[string]string
+	Secrets     map[string]bool // masked
+	ShowSecrets bool
+}
+
+type ResourcesSection struct {
+	MemoryLimit      Size
+	CPUQuota         int64
+	CPUPeriod        int64
+	ShmSize          Size
+	PidsLimit        int64
+	CPUShares        int64
+	CPUS             float64
+	MemorySwap       Size
+	MemorySwappiness int64
+}
+
+type RestartSection struct {
+	Name              string
+	MaximumRetryCount int
+}
+
+type HealthSection struct {
+	Status        string // none, healthy, unhealthy, starting
+	FailingStreak int
+}
+
+type SecuritySection struct {
+	Privileged     bool
+	ReadonlyRootfs bool
+	User           string
+	CapAdd         []string
+	CapDrop        []string
+	SecurityOpt    []string
+}
