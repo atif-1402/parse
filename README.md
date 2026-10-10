@@ -15,6 +15,7 @@ parse git diff -w          # old | new, side by side
 parse ip addr              # one tidy group per interface
 parse journalctl -n 50     # dimmed prefix, colored severities
 parse ss                   # the Process column gets its own column
+parse docker system df -v  # sizes normalized, cache collapsed to one line
 ```
 
 ## The one rule
@@ -86,6 +87,7 @@ Run `parse -l` to see every supported command and what it changes, or `parse -h`
 | **ss** | colliding headers split, process name in its own column |
 | **lsblk** | device tree dimmed, wrapped mountpoints indented |
 | **kubectl** | *experimental*, see [below](#kubectl-experimental) |
+| **docker** | `ps`: names bold, STATE colored by state with exit codes and uptime; `inspect`: semantic sections (state, network, ports, env with secrets masked — `--show-secrets` reveals real values); `network inspect`: name/driver/scope/subnet header, attached containers as a NAME/IPv4/MAC table sorted by name, empty networks get one dim line; `system df`: size-ordered summary (build cache included; `-v` pipe sums marked `~`, direct mode re-runs plain df for exact totals), tables sorted by size then state then name, sizes normalized, unused/dangling tagged, `-v` containers reduced to NAME/STATE/SIZE with empty ones on one dim line, `-v` build cache collapsed to one line (`--all` shows the rows) |
 
 Everything else a tool can do runs unchanged. Mutating commands (`systemctl start`, `git commit`, `kubectl apply`, ...) are never altered.
 
@@ -115,14 +117,13 @@ Machine formats are passed through byte for byte:
 | Format | Why |
 | --- | --- |
 | `git diff --numstat`, `--name-only`, `--name-status`, `--raw`, `--shortstat`, `--stat` | scripts read these |
-| `git diff --word-diff`, `--color-words` | not a normal patch layout |
+| `git diff --word-diff` | not a normal patch layout |
 | `findmnt -r -P -y -J` | raw, pairs, shell, JSON |
-| `ip -brief`, `ip -j` | already compact / JSON |
 | `journalctl -o json`, `-o export`, `-o cat` | machine formats |
 | `lsof -F`, `lsof -t` | script input |
-| `lsblk -J -O -P`, `--output` | script input |
+| `lsblk --output` | script input |
 | `free -h` | already readable (tint only), unit-pinned forms pass through |
-| `ss -o json` | machine format |
+| `docker --format` templates and JSON | scripts read these; network inspect JSON also falls back to raw when a render would say less than docker |
 | anything with `-f` / `--follow` / `--watch` | never ends, handed straight to the terminal |
 
 **Known limit:** two formats that print identical bytes can't be told apart. `git status --porcelain` is byte-identical to `git status -s`, so both get formatted.
@@ -157,6 +158,12 @@ git status | parse --color=never
 
 If parse has a formatter for a command, it replaces the tool's own color with its palette. If it doesn't, text passes through untouched, color included, so `grep --color=always ... | parse` keeps its highlight.
 
+In the middle of a pipeline (`cmd | parse | other`), parse's stdout is not a terminal, so `auto` leaves color off and the bytes pass through unchanged — the next command gets clean input. Force color when the reader handles ANSI:
+
+```
+docker inspect demo-web | parse --color=always | less -R
+```
+
 ## Piped input is auto-detected
 
 When text arrives on stdin, parse works out which tool produced it from its header or shape. This is deliberately strict: a false positive would rewrite another tool's output, so anything unrecognized is passed through unchanged. If you'd rather be explicit, use `parse <tool> ...` instead of piping.
@@ -166,16 +173,29 @@ When text arrives on stdin, parse works out which tool produced it from its head
 - `git log` gets `--decorate=short` added unless you set a decoration mode, because git hides branch/tag markers when output isn't a terminal. Use `--no-decorate` or `--pretty`/`--format` to keep git's own behavior.
 - `-w` before a tool name is parse's side-by-side flag. After the tool name it belongs to the tool (`git log -w` still means "ignore whitespace").
 - English output only. In another locale, headers won't match and output passes through unchanged.
-- `systemctl` colors are left alone on passthrough.
 
 ## kubectl (experimental)
 
 Works as a command and as a pipe, but has **never been run against a live cluster**. It was written from the Kubernetes docs and tested against hand-written fixtures. When unsure, it passes your bytes through untouched, so the worst case is plain `kubectl` output.
 
 Formatted: `get` tables (aligned, STATUS / READY / RESTARTS tinted) and `describe`.
-Passed through: `-o json|yaml|name|jsonpath|go-template|custom-columns`, `--template`, `--no-headers`, `-w`, `kubectl get all`, and every other verb.
+Passed through: `-o json|yaml|name|jsonpath|custom-columns`, `--template`, `--no-headers`, `-w`, `kubectl get all`, and every other verb.
 
 If you run a cluster and it formats something wrongly, please open an issue.
+
+## docker
+
+<p align="center">
+  <img src="assets/docker.gif" alt="docker demo">
+</p>
+
+Works as a command and as a pipe. Four subcommands are formatted, each against live Docker output on this machine:
+
+- **`ps`** — names bold, STATE colored by state with exit codes and uptime, busy ports tinted.
+- **`inspect`** — semantic sections: state, network, ports, env with secrets masked (`--show-secrets` reveals real values). Networks get a name/driver/scope/subnet header, attached containers as a NAME / IPv4 / MAC table sorted by name, and `no containers attached` when empty. Ids, endpoint ids and unset flags are hidden.
+- **`system df`** — size-ordered summary with build cache included; sizes normalized to four significant digits; unused images and dangling layers tagged; `-v` containers reduced to NAME/STATE/SIZE with the empty ones on one dim line broken down by state; `-v` build cache collapsed to one line (`--all` shows the rows). Piped `-v` sums are marked `~`; running the command directly (`parse docker system df -v`) re-runs plain df for exact totals.
+
+Everything else passes through byte for byte: `--format` templates, JSON, and any other verb. When a formatter would print less than docker itself — a network JSON that yields fewer than two lines, say — parse falls back to the raw output instead.
 
 ## Project layout
 
