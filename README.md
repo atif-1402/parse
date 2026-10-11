@@ -28,7 +28,13 @@ Format output that is hard to read. Leave output that already reads well exactly
 
 ## Install
 
-Install the latest Release of parse (Requires Go. see `go.mod` for the minimum version).
+Install the latest Release of parse for AUR
+
+```
+yay -S parse
+```
+
+or (Requires Go. see `go.mod` for the minimum version).
 
 ```
 go install github.com/atif-1402/parse@latest
