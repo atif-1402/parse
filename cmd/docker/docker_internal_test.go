@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/atif-1402/parse/internal/tool"
 )
@@ -342,6 +343,51 @@ func TestFormatRecoversFromPanic(t *testing.T) {
 // A ps heading with no rows under it must not render an empty table: zero
 // rows from non-empty input means the text was not really docker ps, so it
 // goes back untouched.
+// One container in every state: the crash loop sits right under running,
+// ahead of every clean exit, and the whole order stays put across runs.
+// Restarting wears the same warning color as a nonzero exit.
+func TestSortContainersOrderAndRestartColor(t *testing.T) {
+	mk := func(name, state string, exit, createdMin int) Container {
+		return Container{
+			Name:    name,
+			Created: Duration(time.Duration(createdMin) * time.Minute),
+			Status:  ContainerStatus{State: state, ExitCode: exit},
+		}
+	}
+	fresh := func() []Container {
+		// Input deliberately scrambled: order must come from the states.
+		return []Container{
+			mk("p-paused", "paused", 0, 2),
+			mk("e0-clean", "exited", 0, 4),
+			mk("c-made", "created", 0, 5),
+			mk("r-up", "running", 0, 6),
+			mk("e1-failed", "exited", 1, 3),
+			mk("k-loop", "restarting", 1, 1),
+		}
+	}
+	want := []string{"r-up", "k-loop", "e1-failed", "e0-clean", "c-made", "p-paused"}
+
+	for run := 0; run < 3; run++ {
+		got := SortContainers(fresh())
+		var names []string
+		for _, c := range got {
+			names = append(names, c.Name)
+		}
+		if strings.Join(names, ",") != strings.Join(want, ",") {
+			t.Fatalf("run %d: order = %v, want %v", run+1, names, want)
+		}
+	}
+
+	restarting := formatState(ContainerStatus{State: "restarting"})
+	failed := formatState(ContainerStatus{State: "exited", ExitCode: 1})
+	if !strings.HasPrefix(restarting, "<"+red+">") || !strings.HasPrefix(failed, "<"+red+">") {
+		t.Errorf("restarting must share the nonzero-exit warning color: restarting=%q exited1=%q", restarting, failed)
+	}
+	if s := formatState(ContainerStatus{State: "paused"}); !strings.HasPrefix(s, "<"+yellow+">") {
+		t.Errorf("paused should stay in the mild tint: %q", s)
+	}
+}
+
 func TestPSTableWithNoRowsFallsBackToInput(t *testing.T) {
 	input := "CONTAINER ID   IMAGE     COMMAND     CREATED     STATUS     PORTS     NAMES\n"
 	var out strings.Builder

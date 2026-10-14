@@ -164,7 +164,14 @@ func formatState(s ContainerStatus) string {
 			return paintRed(fmt.Sprintf("%s %d %s ago", s.State, s.ExitCode, s.RunningFor.Human()))
 		}
 		return paintRed(fmt.Sprintf("%s %d", s.State, s.ExitCode))
-	case "created", "restarting", "paused":
+	case "restarting":
+		// A crash loop is as much a problem as a nonzero exit, so it wears
+		// the same warning color rather than sitting in the mild tint.
+		if s.RunningFor > 0 {
+			return paintRed(fmt.Sprintf("%s %s", s.State, s.RunningFor.Human()))
+		}
+		return paintRed(s.State)
+	case "created", "paused":
 		if s.RunningFor > 0 {
 			return paintYellow(fmt.Sprintf("%s %s", s.State, s.RunningFor.Human()))
 		}

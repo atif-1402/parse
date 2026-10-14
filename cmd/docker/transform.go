@@ -259,9 +259,24 @@ func SortContainers(containers []Container) []Container {
 			return a.Name < b.Name
 		}
 
+		// Restarting sits between running and the exits: a crash loop is a
+		// live problem, and a reader must not have to dig past settled exits
+		// to find it.
+		aRestarting := a.Status.State == "restarting"
+		bRestarting := b.Status.State == "restarting"
+		if aRestarting != bRestarting {
+			return aRestarting
+		}
+		if aRestarting {
+			if a.Created != b.Created {
+				return a.Created > b.Created
+			}
+			return a.Name < b.Name
+		}
+
 		// Exited forms one contiguous block before the other states
-		// (restarting, paused, created, dead), so a failure is always at the
-		// top of the non-running section.
+		// (paused, created, dead), so a failure is always at the top of the
+		// non-running section.
 		aExited := a.Status.State == "exited"
 		bExited := b.Status.State == "exited"
 		if aExited != bExited {
