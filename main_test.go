@@ -3,6 +3,7 @@
 package main
 
 import (
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -239,5 +240,42 @@ func TestUsageMentionsSideBySide(t *testing.T) {
 		if !strings.Contains(usage, want) {
 			t.Errorf("usage does not mention %q:\n%s", want, usage)
 		}
+	}
+}
+
+// The ldflags stamp is the primary source; without it, a module build
+// (go install ...@v0.2.0, the AUR package) only has ReadBuildInfo to
+// offer, and plain `go build` has neither.
+func TestVersionFromBuildInfo(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		info *debug.BuildInfo
+		ok   bool
+		want string
+	}{
+		{"real tag", &debug.BuildInfo{Main: debug.Module{Version: "v0.2.0"}}, true, "0.2.0"},
+		{"no leading v", &debug.BuildInfo{Main: debug.Module{Version: "0.3.1"}}, true, "0.3.1"},
+		{"devel", &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}, true, "dev"},
+		{"empty", &debug.BuildInfo{Main: debug.Module{Version: ""}}, true, "dev"},
+		{"pseudo-version", &debug.BuildInfo{Main: debug.Module{Version: "v0.0.0-20261011010203-abcdef123456"}}, true, "0.0.0-20261011010203-abcdef123456"},
+		{"no build info", nil, false, "dev"},
+	} {
+		if got := versionFromBuildInfo(c.info, c.ok); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// ldflags always wins: displayVersion only consults build info while the
+// stamped default is untouched.
+func TestDisplayVersionPrefersLdflags(t *testing.T) {
+	defer func(v string) { version = v }(version)
+	version = "9.9.9"
+	if got := displayVersion(); got != "9.9.9" {
+		t.Errorf("ldflags-stamped version lost to build info: got %q", got)
+	}
+	version = "dev"
+	if got := displayVersion(); got == "" {
+		t.Error("displayVersion returned empty")
 	}
 }

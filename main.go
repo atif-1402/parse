@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -54,6 +55,30 @@ Paging:
 // version is stamped at build time with -ldflags "-X main.version=..."
 // and falls back to "dev" for a plain `go build`.
 var version = "dev"
+
+// displayVersion is what `parse -v` prints: the ldflags stamp when set,
+// otherwise the module version go embedded at build time, otherwise "dev".
+func displayVersion() string {
+	if version != "dev" {
+		return version
+	}
+	return versionFromBuildInfo(debug.ReadBuildInfo())
+}
+
+// versionFromBuildInfo pulls the module version out of the build info a
+// module build (go install ...@v0.2.0, AUR) records. ldflags already won
+// by the time this runs; "(devel)" and empty are what a plain `go build`
+// says, and only mean "dev".
+func versionFromBuildInfo(info *debug.BuildInfo, ok bool) string {
+	if !ok || info == nil {
+		return "dev"
+	}
+	v := info.Main.Version
+	if v == "" || v == "(devel)" {
+		return "dev"
+	}
+	return strings.TrimPrefix(v, "v")
+}
 
 // tool describes one command parse can run or format, and is what `parse -l`
 // prints. Grouped the way the README groups them, not alphabetically, because
@@ -145,7 +170,7 @@ func run(args []string) int {
 		return 0
 	}
 	if opts.showVersion {
-		fmt.Println("parse", version)
+		fmt.Println("parse", displayVersion())
 		return 0
 	}
 	colorEnabled = opts.color()
@@ -215,7 +240,7 @@ func run(args []string) int {
 	case "-v", "--version":
 		// Only reachable when no tool was named, which parseArgs already
 		// turned into showVersion; kept for the case where rest starts with it.
-		fmt.Println("parse", version)
+		fmt.Println("parse", displayVersion())
 		return 0
 	}
 	// parse runs a command it knows how to format, and says so plainly when it
