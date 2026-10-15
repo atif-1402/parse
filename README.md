@@ -198,6 +198,7 @@ Works as a command and as a pipe. Four subcommands are formatted, each against l
 
 - **`ps`** — names bold, STATE colored by state with exit codes and uptime, busy ports tinted.
 - **`inspect`** — semantic sections: state, network, ports, env with secrets masked (`--show-secrets` reveals real values). Networks get a name/driver/scope/subnet header, attached containers as a NAME / IPv4 / MAC table sorted by name, and `no containers attached` when empty. Ids, endpoint ids and unset flags are hidden.
+- **`image inspect`** — tags and short id, size/created/os-arch, layers, entrypoint/cmd, user (root dimmed), ports, workdir and healthcheck; env is reduced to what the user's own image baked in, with base-image defaults hidden. Secrets baked into an image are masked, and `--show-secrets` reveals them. Mixed arrays decide per object, and an unknown object is printed raw.
 - **`system df`** — size-ordered summary with build cache included; sizes normalized to four significant digits; unused images and dangling layers tagged; `-v` containers reduced to NAME/STATE/SIZE with the empty ones on one dim line broken down by state; `-v` build cache collapsed to one line (`--all` shows the rows). Piped `-v` sums are marked `~`; running the command directly (`parse docker system df -v`) re-runs plain df for exact totals.
 
 Everything else passes through byte for byte: `--format` templates, JSON, and any other verb. When a formatter would print less than docker itself — a network JSON that yields fewer than two lines, say — parse falls back to the raw output instead.
