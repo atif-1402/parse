@@ -3,12 +3,25 @@
 </p>
 
 <p align="center">
+  <b>Single Go binary · Standard library only · Linux only</b><br>
+  <i>It wraps findmnt, lsblk, ss, systemctl, journalctl and friends, which don't exist on macOS.</i>
+</p>
+
+<p align="center">
+  <a href="https://github.com/atif-1402/parse/releases"><img src="https://img.shields.io/github/v/release/atif-1402/parse?display_name=tag" alt="release"></a>
+  <a href="https://go.dev/"><img src="https://img.shields.io/badge/go-1.21+-00ADD8?logo=go&logoColor=white" alt="Go 1.21+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/atif-1402/parse" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/platform-Linux-lightgrey" alt="Linux only">
+  <img src="https://img.shields.io/badge/stdlib-only-2ea44f" alt="standard library only">
+</p>
+
+<p align="center">
   <img src="assets/preview.gif" alt="parse demo">
 </p>
 
-Single Go binary. Standard library only. **Linux only** (it wraps `findmnt`, `lsblk`, `ss`, `systemctl`, `journalctl` and friends, which don't exist on macOS).
-
-> **Status: v0.2.0.** Feedback and bug reports welcome. See [Reporting bugs](#reporting-bugs).
+<p align="center">
+  <b>Status: v0.2.0.</b> Feedback and bug reports welcome. <a href="#reporting-bugs">See reporting bugs</a>.
+</p>
 
 ```
 parse git diff -w          # old | new, side by side
@@ -234,6 +247,6 @@ MIT
 
 ## Contributing
 
-Want to add a tool or fix one? See [CONTRIBUTION.md](CONTRIBUTION.md) for
+Want to add a tool or fix one? See [CONTRIBUTING.md](CONTRIBUTING.md) for
 the ground rules, how to add a tool under `cmd/`, and what `make check`
 expects before a pull request.
