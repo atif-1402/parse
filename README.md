@@ -3,8 +3,7 @@
 </p>
 
 <p align="center">
-  <b>Single Go binary · Standard library only · Linux only</b><br>
-  <i>It wraps findmnt, lsblk, ss, systemctl, journalctl and friends, which don't exist on macOS.</i>
+  <b>Single Go binary · Standard library only · Linux only</b>
 </p>
 
 <p align="center">
@@ -16,11 +15,22 @@
 </p>
 
 <p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#usage">Usage</a> ·
+  <a href="#supported-tools">Supported tools</a> ·
+  <a href="#side-by-side-diffs">Diffs</a> ·
+  <a href="#docker">Docker</a> ·
+  <a href="#reporting-bugs">Bugs</a> ·
+  <a href="#contributing">Contributing</a> ·
+  <a href="https://github.com/atif-1402/parse/releases">Releases</a>
+</p>
+
+<p align="center">
   <img src="assets/preview.gif" alt="parse demo">
 </p>
 
 <p align="center">
-  <b>Status: v0.2.0.</b> Feedback and bug reports welcome. <a href="#reporting-bugs">See reporting bugs</a>.
+  <b>Status: v0.2.5.</b> Feedback and bug reports welcome. <a href="#reporting-bugs">See reporting bugs</a>.
 </p>
 
 ```
