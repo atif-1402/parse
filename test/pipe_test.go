@@ -802,3 +802,132 @@ func TestPipeShowSecretsFlag(t *testing.T) {
 		t.Errorf("--show-secrets pipe output still carries the masked note:\n%s", shown)
 	}
 }
+
+// -- info --
+
+// infoInfoFixture is `docker info` in the shape the detector demands:
+// a Client: header, a Containers: line, a Server Version: line — which
+// docker version also starts with, minus the last two.
+func infoTextFixture() string {
+	return lines(
+		`Client:`,
+		` Version:    29.7.2`,
+		` Context:    default`,
+		` Debug Mode: false`,
+		` Plugins:`,
+		`  buildx: Docker Buildx (Docker Inc.)`,
+		`    Version:  0.37.0`,
+		`    Path:     /usr/lib/docker/cli-plugins/docker-buildx`,
+		`  compose: Docker Compose (Docker Inc.)`,
+		`    Version:  5.5.1`,
+		`    Path:     /usr/lib/docker/cli-plugins/docker-compose`,
+		``,
+		`Server:`,
+		` Containers: 20`,
+		`  Running: 1`,
+		`  Paused: 0`,
+		`  Stopped: 19`,
+		` Images: 9`,
+		` Server Version: 29.7.2`,
+		` Storage Driver: overlayfs`,
+		`  Backing Filesystem: extfs`,
+		` Logging Driver: json-file`,
+		` Cgroup Driver: systemd`,
+		` Cgroup Version: 2`,
+		` Swarm: inactive`,
+		` Default Runtime: runc`,
+		` runc version: 1.5.1`,
+		` Kernel Version: 7.2.5-4-omarchy`,
+		` Operating System: Omarchy`,
+		` Architecture: x86_64`,
+		` CPUs: 4`,
+		` Total Memory: 7.634GiB`,
+		` Name: anom`,
+		` Docker Root Dir: /var/lib/docker`,
+		` Debug Mode: false`,
+		` Experimental: false`,
+		` Live Restore Enabled: false`,
+		`WARNING: Content and image metadata are not encrypted by default.`,
+	)
+}
+
+// docker info is claimed: the header, the summary rows, the verbatim
+// warning and the hidden count all come out.
+func TestDockerInfoIsClaimedInThePipe(t *testing.T) {
+	got := throughCmd(infoTextFixture())
+	for _, want := range []string{
+		"docker 29.7.2 · context default · anom",
+		"containers 20 total · 1 running · 0 paused · 19 stopped · 9 images",
+		"storage    overlayfs (extfs) · root /var/lib/docker",
+		"plugins    buildx 0.37.0 · compose 5.5.1",
+		"WARNING: Content and image metadata are not encrypted by default.",
+		"more fields hidden, run docker info for everything",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("docker info was not claimed, missing %q:\n%q", want, got)
+		}
+	}
+	// At defaults none of the conditional rows appear.
+	for _, hide := range []string{"swarm", "live restore", "debug", "experimental"} {
+		if strings.Contains(got, hide+" ") {
+			t.Errorf("conditional row %q leaked at defaults:\n%q", hide, got)
+		}
+	}
+}
+
+// Black box, the real binary: same render through `docker info | parse`.
+func TestDockerInfoFormatsThePipe(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go toolchain")
+	}
+	got := runParse(t, infoTextFixture())
+	for _, want := range []string{
+		"docker 29.7.2 · context default · anom",
+		"containers 20 total · 1 running · 0 paused · 19 stopped · 9 images",
+		"more fields hidden, run docker info for everything",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("piped docker info missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// docker version also begins with Client: and carries Server Version-free
+// engine details — it must not be claimed, nor --format output, a daemon
+// that is down, or anything else.
+func TestDockerInfoNonInfoIsLeftAlone(t *testing.T) {
+	passthrough(t, "docker version", lines(
+		`Client:`,
+		` Version:           29.7.2`,
+		` API version:       1.55`,
+		` Go version:        go1.26.5`,
+		` Git commit:        a7dcaa6fdb`,
+		` Context:           default`,
+		``,
+		`Server:`,
+		` Engine:`,
+		`  Version:          29.7.2`,
+		`  API version:     1.55`,
+		`  Go version:      go1.26.5`,
+		`  OS/Arch:         linux/amd64`,
+	))
+	passthrough(t, "info --format", "29.7.2\n")
+	passthrough(t, "daemon down", lines(
+		`Client:`,
+		` Version:    29.7.2`,
+		` Context:    default`,
+		` Debug Mode: false`,
+		` Plugins:`,
+		`  buildx: Docker Buildx (Docker Inc.)`,
+		`    Version:  0.37.0`,
+		`    Path:     /usr/lib/docker/cli-plugins/docker-buildx`,
+		``,
+		`Server:`,
+		`failed to connect to the docker API at unix:///tmp/nope.sock; check if the path is correct and if the daemon is running: dial unix /tmp/nope.sock: connect: no such file or directory`,
+	))
+	passthrough(t, "garbage", lines(
+		`random text`,
+		`with a colon: in it`,
+		`no docker here`,
+	))
+}

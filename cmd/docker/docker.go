@@ -1,12 +1,14 @@
-// Package docker formats docker output. Three subcommands are understood:
+// Package docker formats docker output. Four subcommands are understood:
 // `docker ps` (and `ps -a`), whose table gets a bold heading, a STATUS tinted
 // by state and a tinted published port; `docker inspect` — and the JSON of
 // `docker network inspect` and `docker image inspect` alike — whose array
 // gets split by shape into containers, networks and images, each rendered
-// with colored keys, values and a few state-aware fields; and
-// `docker system df`, whose summary and tables are normalized. Every other
-// subcommand, including the machine forms of any of these and the streaming
-// of `docker logs -f`, is handed through byte for byte.
+// with colored keys, values and a few state-aware fields;
+// `docker info`, whose client and server sections become one summary with
+// warnings kept verbatim; and `docker system df`, whose summary and tables
+// are normalized. Every other subcommand, including the machine forms of
+// any of these and the streaming of `docker logs -f`, is handed through
+// byte for byte.
 package docker
 
 import (
@@ -41,6 +43,10 @@ func Run(args []string) int {
 
 	if sub == "inspect" && !isPipe() {
 		return runInspectDirect(args)
+	}
+
+	if sub == "info" && !isPipe() {
+		return runInfoDirect(args)
 	}
 
 	if sub == "df" {
@@ -149,6 +155,34 @@ func runInspectDirect(args []string) int {
 	return code
 }
 
+// runInfoDirect asks docker for machine-readable info first —
+// `docker info --format '{{json .}}'` — and renders the JSON when this
+// docker speaks it; otherwise it falls back to parsing docker's own text.
+// The exit code is always docker's.
+func runInfoDirect(args []string) int {
+	dockerArgs := []string{"info"}
+	for _, a := range args {
+		if a != "info" {
+			dockerArgs = append(dockerArgs, a)
+		}
+	}
+
+	jsonText, code, started := tool.Capture("docker", append(dockerArgs, "--format", "{{json .}}"))
+	if started && code == 0 {
+		if v, ok := normalizeInfoJSON(jsonText); ok {
+			fmt.Fprint(os.Stdout, renderInfo(v))
+			return code
+		}
+	}
+
+	text, code, started := tool.Capture("docker", dockerArgs)
+	if !started {
+		return code
+	}
+	formatInfo(os.Stdout, text)
+	return code
+}
+
 // showSecrets is the CLI's --show-secrets, set once by cmd.SetShowSecrets
 // before any formatting. It reaches the piped path through Format; the direct
 // path also accepts the flag after `inspect`, where it belongs to docker.
@@ -197,6 +231,8 @@ func reformat(sub string, args []string) bool {
 	case "ps":
 		return !psScriptForm(args)
 	case "inspect":
+		return !inspectScriptForm(args)
+	case "info":
 		return !inspectScriptForm(args)
 	case "df":
 		return true
@@ -286,6 +322,9 @@ func Detect(text string) string {
 	if looksLikeSystemDF(text) {
 		return "df"
 	}
+	if looksLikeInfo(text) {
+		return "info"
+	}
 	return ""
 }
 
@@ -307,6 +346,8 @@ func Format(w io.Writer, sub, text string) {
 		formatPS(w, text)
 	case "inspect":
 		formatInspect(w, text)
+	case "info":
+		formatInfo(w, text)
 	case "df":
 		formatSystemDF(w, text)
 	default:
