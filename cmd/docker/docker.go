@@ -1,9 +1,12 @@
-// Package docker formats docker output. Two subcommands are understood so far:
+// Package docker formats docker output. Three subcommands are understood:
 // `docker ps` (and `ps -a`), whose table gets a bold heading, a STATUS tinted
-// by state and a tinted published port; and `docker inspect`, whose JSON gets
-// colored keys, values and a few state-aware fields. Every other subcommand,
-// including the machine forms of either and the streaming of `docker logs -f`,
-// is handed through byte for byte.
+// by state and a tinted published port; `docker inspect` — and the JSON of
+// `docker network inspect` and `docker image inspect` alike — whose array
+// gets split by shape into containers, networks and images, each rendered
+// with colored keys, values and a few state-aware fields; and
+// `docker system df`, whose summary and tables are normalized. Every other
+// subcommand, including the machine forms of any of these and the streaming
+// of `docker logs -f`, is handed through byte for byte.
 package docker
 
 import (
@@ -117,6 +120,11 @@ func runPSDirect(args []string) int {
 func runInspectDirect(args []string) int {
 	dockerArgs := []string{"inspect"}
 	fromTool := false
+	imageForm := len(args) >= 2 && args[0] == "image" && args[1] == "inspect"
+	if imageForm {
+		dockerArgs = []string{"image", "inspect"}
+		args = args[1:]
+	}
 	for _, a := range args {
 		switch {
 		case a == "inspect":
@@ -137,19 +145,7 @@ func runInspectDirect(args []string) int {
 		fmt.Fprint(os.Stdout, text)
 		return code
 	}
-
-	if out, ok := networkInspectText(text, raw); ok {
-		fmt.Fprint(os.Stdout, out)
-		return code
-	}
-
-	views := NormalizeInspect(raw)
-	applyShowSecrets(views, showSecrets || fromTool)
-	output := RenderInspect(views)
-	if output == "" {
-		output = text
-	}
-	fmt.Fprint(os.Stdout, output)
+	fmt.Fprint(os.Stdout, inspectRender(text, raw, showSecrets || fromTool))
 	return code
 }
 
@@ -336,9 +332,9 @@ func psHeader(lines []string) (int, []int, bool) {
 }
 
 // looksLikeInspect claims only JSON that is an array of objects shaped like
-// `docker inspect` output: containers (Id, State, Config) or networks
-// (Driver, IPAM). Anything else — ss -o json, ip -j, kubectl — passes
-// through untouched.
+// `docker inspect` output: containers (Id, State, Config), networks
+// (Driver, IPAM) or images (Id, RootFS, no State). Anything else — ss -o
+// json, ip -j, kubectl — passes through untouched.
 func looksLikeInspect(text string) bool {
 	text = strings.TrimSpace(text)
 	if !strings.HasPrefix(text, "[") {
@@ -348,9 +344,17 @@ func looksLikeInspect(text string) bool {
 	if err := json.Unmarshal([]byte(text), &arr); err != nil || len(arr) == 0 {
 		return false
 	}
-	first := arr[0]
-	return hasAllKeys(first, "Id", "State", "Config") ||
-		hasAllKeys(first, "Driver", "IPAM")
+	// Any docker-shaped object claims the array — a mixed
+	// `docker inspect <container> <image>` answers per object, and an
+	// unknown object inside it is printed raw rather than dropped.
+	for _, obj := range arr {
+		if hasAllKeys(obj, "Id", "State", "Config") ||
+			hasAllKeys(obj, "Driver", "IPAM") ||
+			imageObject(obj) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasAllKeys(m map[string]interface{}, keys ...string) bool {
@@ -399,18 +403,77 @@ func formatInspect(w io.Writer, text string) {
 		io.WriteString(w, text)
 		return
 	}
-	if out, ok := networkInspectText(text, raw); ok {
-		io.WriteString(w, out)
-		return
+	io.WriteString(w, inspectRender(text, raw, showSecrets))
+}
+
+// inspectRender renders docker inspect JSON, deciding per object: has
+// State → container, has RootFS and no State → image, Driver+IPAM →
+// network, anything else stays raw. Objects that cannot be summarized
+// come back as their own raw JSON, so the render never says less than
+// raw docker would. Networks in one homogeneous array keep their
+// single-shot render; blocks are separated by blank lines in input order.
+func inspectRender(text string, raw []map[string]interface{}, show bool) string {
+	if allNetworks(raw) {
+		if out, ok := networkInspectText(text, raw); ok {
+			return out
+		}
 	}
-	views := NormalizeInspect(raw)
-	applyShowSecrets(views, showSecrets)
-	output := RenderInspect(views)
-	if output == "" {
-		io.WriteString(w, text)
-		return
+	blocks := make([]string, 0, len(raw))
+	rendered := false
+	for _, obj := range raw {
+		block, ok := inspectObjectBlock(obj, show)
+		if ok {
+			rendered = true
+		}
+		blocks = append(blocks, block)
 	}
-	io.WriteString(w, output)
+	if !rendered {
+		// Every object fell back: hand docker's own bytes back.
+		return text
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+// allNetworks reports whether every object is network-shaped, which keeps
+// a pure network array on networkInspectText's own path.
+func allNetworks(raw []map[string]interface{}) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	for _, obj := range raw {
+		if !hasAllKeys(obj, "Driver", "IPAM") {
+			return false
+		}
+	}
+	return true
+}
+
+// inspectObjectBlock renders one inspect object by its shape and reports
+// whether the block is a real render (false → raw JSON).
+func inspectObjectBlock(obj map[string]interface{}, show bool) (string, bool) {
+	// A docker container carries State *and* an Id; a foreign object with
+	// a stray "State" key falls through to raw below.
+	if _, hasState := obj["State"]; hasState && obj["Id"] != nil {
+		views := NormalizeInspect([]map[string]interface{}{obj})
+		applyShowSecrets(views, show)
+		if out := RenderInspect(views); out != "" {
+			return out, true
+		}
+		return rawJSONObject(obj), false
+	}
+	if imageObject(obj) {
+		return imageObjectBlock(obj, show)
+	}
+	if hasAllKeys(obj, "Driver", "IPAM") {
+		// An empty text arg makes networkInspectText's thin-render
+		// fallback indistinguishable from "no render": both come back
+		// empty, and the object is printed raw instead.
+		if out, ok := networkInspectText("", []map[string]interface{}{obj}); ok && out != "" {
+			return out, true
+		}
+		return rawJSONObject(obj), false
+	}
+	return rawJSONObject(obj), false
 }
 
 // dfColumnStarts computes column start positions from a header line.

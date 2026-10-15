@@ -553,6 +553,112 @@ func TestDockerNetworkInspectIsClaimedInThePipeNew(t *testing.T) {
 	}
 }
 
+// docker image inspect's JSON is claimed by keys only docker images print —
+// Id plus RootFS and no State — and comes out as the image summary. A
+// container's or a network's inspect still reaches its own formatter.
+func TestDockerImageInspectIsClaimedInThePipe(t *testing.T) {
+	got := throughCmd(lines(
+		`[`,
+		`    {`,
+		`        "Id": "sha256:aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899990000",`,
+		`        "RepoTags": ["fx-img:1"],`,
+		`        "Size": 7340032,`,
+		`        "Architecture": "amd64",`,
+		`        "Os": "linux",`,
+		`        "RootFS": {"Type": "layers", "Layers": ["sha256:l1", "sha256:l2"]},`,
+		`        "Config": {"Cmd": ["sh"], "User": "1000:1000", "Env": ["APP_MODE=prod"]}`,
+		`    }`,
+		`]`,
+	))
+	if !strings.Contains(got, "fx-img:1") || !strings.Contains(got, "layers    2") {
+		t.Errorf("docker image inspect JSON was not claimed:\n%q", got)
+	}
+	if !strings.Contains(got, "APP_MODE=prod") {
+		t.Errorf("the user's env missing from the image render:\n%q", got)
+	}
+	// The container formatter's own marker must not appear: this is not a
+	// container inspect.
+	if strings.Contains(got, "state") {
+		t.Errorf("image JSON was rendered as a container:\n%q", got)
+	}
+}
+
+// A script asking image inspect for a template gets the same bytes back.
+func TestDockerImageInspectFormatFormsAreLeftAlone(t *testing.T) {
+	passthrough(t, "image inspect --format", "sha256:aaaabbbbccccddddeeeeffff00001111\n")
+}
+
+// Black box, the real binary: image inspect JSON comes out as the summary
+// with base env hidden, the root user warned, and secrets masked.
+func TestDockerImageInspectFormatsThePipe(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go toolchain")
+	}
+	fix := lines(
+		`[`,
+		`    {`,
+		`        "Id": "sha256:aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899990000",`,
+		`        "RepoTags": ["fx-img:1"],`,
+		`        "Created": "2026-09-20T10:00:00.000000000Z",`,
+		`        "Size": 7340032,`,
+		`        "Architecture": "amd64",`,
+		`        "Os": "linux",`,
+		`        "RootFS": {"Type": "layers", "Layers": ["sha256:l1", "sha256:l2"]},`,
+		`        "Config": {`,
+		`            "Cmd": ["sh"],`,
+		`            "User": "",`,
+		`            "Env": ["PATH=/usr/local/bin", "DB_PASSWORD=hunter2", "APP_MODE=prod"]`,
+		`        }`,
+		`    }`,
+		`]`,
+	)
+	got := runParse(t, fix)
+	for _, want := range []string{
+		"fx-img:1",
+		"aaaabbbbcccc",
+		"user      root",
+		"APP_MODE=prod",
+		"DB_PASSWORD=********",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("image output is missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "PATH=") {
+		t.Errorf("base image env leaked:\n%s", got)
+	}
+	if strings.Contains(got, "hunter2") {
+		t.Errorf("a secret leaked without --show-secrets:\n%s", got)
+	}
+	if strings.Contains(got, "\x1b[") {
+		t.Errorf("the pipe carries escapes:\n%q", got)
+	}
+}
+
+// Black box, the real binary: --show-secrets answers with the real values.
+func TestDockerImageInspectShowSecretsInThePipe(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go toolchain")
+	}
+	fix := lines(
+		`[`,
+		`    {`,
+		`        "Id": "sha256:aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899990000",`,
+		`        "RepoTags": ["fx-img:1"],`,
+		`        "RootFS": {"Type": "layers", "Layers": ["sha256:l1"]},`,
+		`        "Config": {"Cmd": ["sh"], "User": "", "Env": ["DB_PASSWORD=hunter2"]}`,
+		`    }`,
+		`]`,
+	)
+	got := runParse(t, fix, "--show-secrets")
+	if !strings.Contains(got, "DB_PASSWORD=hunter2") {
+		t.Errorf("--show-secrets did not reveal the value:\n%s", got)
+	}
+	if strings.Contains(got, "use --show-secrets") {
+		t.Errorf("the warning must go away under --show-secrets:\n%s", got)
+	}
+}
+
 // Black box, the real binary: network inspect JSON comes out as a header
 // plus the attached containers table, with the id and unset flags hidden.
 func TestDockerNetworkInspectFormatsThePipe(t *testing.T) {
