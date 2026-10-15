@@ -39,9 +39,8 @@ Individual targets: `make test`, `make fmt`, `make vet`, `make build`.
 
 ## Adding support for a tool
 
-`COMMAND-TO-ADD.md` is the roadmap: it ranks candidate tools and the
-argument forms worth claiming. Pick from there and keep the change to one
-tool.
+Pick a tool whose output is hard to read — one command at a time — and
+keep the change to that tool alone.
 
 1. **Create `cmd/<tool>/`** with an internal test beside the source:
    - `Run(args []string) int` — the direct path: `tool.Passthrough` for

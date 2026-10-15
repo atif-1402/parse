@@ -12,3 +12,6 @@ coverage.txt
 .idea/
 .vscode/
 .DS_Store
+
+# Internal planning docs (kept locally only)
+/COMMAND-TO-ADD.md
