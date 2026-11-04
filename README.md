@@ -30,7 +30,7 @@
 </p>
 
 <p align="center">
-  <b>Status: v0.2.5.</b> Feedback and bug reports welcome. <a href="#reporting-bugs">See reporting bugs</a>.
+  <b>Status: v0.2.6.</b> Feedback and bug reports welcome. <a href="#reporting-bugs">See reporting bugs</a>.
 </p>
 
 ```
@@ -39,6 +39,7 @@ parse ip addr              # one tidy group per interface
 parse journalctl -n 50     # dimmed prefix, colored severities
 parse ss                   # the Process column gets its own column
 parse docker system df -v  # sizes normalized, cache collapsed to one line
+parse curl -I https://example.com  # status colored, header keys cyan
 ```
 
 ## The one rule
