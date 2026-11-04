@@ -103,7 +103,7 @@ var toolList = []toolInfo{
 	{"lsblk", "device tree dimmed; wrapped mountpoints indented under their device"},
 	{"kubectl", "experimental: get tables aligned with STATUS tinted; describe keys dimmed, states colored"},
 	{"docker", "ps: names bold, STATE colored with exit codes and uptime; inspect: sections for state, network, env with secrets masked (--show-secrets reveals); image inspect: tags + short id, size/created/os-arch, layers, entrypoint/cmd, user warned when root, env reduced to what the user baked in, secrets masked; info: one-screen summary with warnings kept verbatim and a hidden-field count; network inspect: header plus attached-container table, empty networks one dim line; volume inspect: name/driver/scope header with mountpoint, created, labels and options; system df: size-ordered summary incl build cache, -v caches on one line (--all for rows)"},
-	{"curl", "-I/-i: status line colored by code, header keys cyan, body untouched; -v: verbose noise dimmed, failures red; bodies, JSON and -w output pass through"},
+	{"curl", "-I/-i: status line colored by code, header keys cyan, body untouched; -v: verbose noise dimmed, failures red, response status colored; a bare curl: (n) failure red; meter dropped; bodies, JSON and -w output pass through"},
 }
 
 // tools are the subcommands parse knows how to run. Anything else is reported

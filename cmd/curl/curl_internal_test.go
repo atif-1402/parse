@@ -205,7 +205,8 @@ func TestCurlDetectsConnectFailureWithoutRequest(t *testing.T) {
 
 // Everything a script reads or a server sends as data comes back byte
 // for byte: an HTML body, JSON, a -w write-out, a lone status line with
-// no headers, a curl error with no -v around it, a bullet list, garbage.
+// no headers, a curl error that is not the opening line, a bullet list,
+// garbage.
 func TestCurlLeavesEverythingElseAlone(t *testing.T) {
 	for name, text := range map[string]string{
 		"html body":       "<!doctype html>\n<html><body>hi</body></html>\n",
@@ -213,7 +214,7 @@ func TestCurlLeavesEverythingElseAlone(t *testing.T) {
 		"write-out":       "200\n",
 		"plain text":      "ok\n",
 		"status alone":    "HTTP/2 200\n",
-		"curl error only": "curl: (6) Could not resolve host: nonexistent.invalid\n",
+		"error not first": "some log line\ncurl: (6) Could not resolve host: nonexistent.invalid\n",
 		"bullets":         "* first point\n* second point\n",
 		"garbage":         "random text\nwith a colon: in it\n",
 		"empty":           "",
@@ -431,5 +432,45 @@ func TestCurlMeterAfterStatusDropsButDigitBodyStays(t *testing.T) {
 		"* Connection #0 to host example.com:443 left intact\n"
 	if stripPaint(out) != want {
 		t.Errorf("body must be byte for byte:\ngot  %q\nwant %q", stripPaint(out), want)
+	}
+}
+
+// A failure curl reported on its own line — no -v around it — is
+// claimed: the meter before it goes, the error goes bold red, and the
+// error's own bytes survive.
+func TestCurlBareErrorIsClaimedAndRed(t *testing.T) {
+	fix := "  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current\n" +
+		"                                 Dload  Upload  Total   Spent   Left   Speed\n" +
+		"\r  0      0   0      0   0      0      0      0                              0\n" +
+		"curl: (22) The requested URL returned error: 403\n"
+
+	if got := Detect(fix); got != "error" {
+		t.Fatalf("Detect = %q, want error", got)
+	}
+	out := format(Detect(fix), fix)
+	if strings.Contains(out, "% Total") {
+		t.Errorf("meter must be dropped:\n%q", out)
+	}
+	if !strings.Contains(out, "<bold red>curl: (22) The requested URL returned error: 403</>") {
+		t.Errorf("error not painted bold red:\n%q", out)
+	}
+	want := "curl: (22) The requested URL returned error: 403\n"
+	if stripPaint(out) != want {
+		t.Errorf("error must be byte for byte:\ngot  %q\nwant %q", stripPaint(out), want)
+	}
+}
+
+// A meter fragment glued in front of the error line loses only the
+// fragment, and the error is still what claims the text.
+func TestCurlErrorGluedToMeterIsClaimed(t *testing.T) {
+	fix := "  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current\n" +
+		"\r  0      0   0      0curl: (18) transfer closed with 577 bytes remaining to read\n"
+	if got := Detect(fix); got != "error" {
+		t.Fatalf("Detect = %q, want error", got)
+	}
+	out := format(Detect(fix), fix)
+	want := "curl: (18) transfer closed with 577 bytes remaining to read\n"
+	if stripPaint(out) != want {
+		t.Errorf("glued error must be byte for byte:\ngot  %q\nwant %q", stripPaint(out), want)
 	}
 }

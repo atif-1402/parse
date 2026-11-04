@@ -1,10 +1,11 @@
-// Package curl formats curl's output. Two shapes are worth formatting and
-// both are claimed only from their opening line: a response's status line
-// with headers under it (`curl -I`, `-i`), where the status gets a color
-// by code and the header keys go cyan; and curl's own verbose stream
+// Package curl formats curl's output. Three shapes are worth formatting
+// and all are claimed only from their opening line: a response's status
+// line with headers under it (`curl -I`, `-i`), where the status gets a
+// color by code and the header keys go cyan; curl's own verbose stream
 // (`curl -v … 2>&1`), where the wall of `*` lines is dimmed, the response
-// status still colored, and failures red. Bodies, JSON, `-w` write-outs
-// and every other form pass through byte for byte.
+// status still colored, and failures red; and a bare `curl: (n)` failure
+// with nothing around it, painted red on its own. Bodies, JSON, `-w`
+// write-outs and every other form pass through byte for byte.
 //
 // curl's progress meter shares the stream: stderr is unbuffered, so in
 // `curl -I … 2>&1` the meter arrives before curl's buffered stdout, and in
@@ -46,7 +47,10 @@ var (
 	// A meter fragment glued in front of a real line with no break, as
 	// when curl writes `0 … 0* using HTTP/2` in one go. At least one
 	// digit or space must sit in front, so a plain `* ` line is not one.
-	reMeterGlue = regexp.MustCompile(`^[0-9 ]+(\* |> |HTTP/)`)
+	reMeterGlue = regexp.MustCompile(`^[0-9 ]+(\* |> |HTTP/|curl: \()`)
+	// curl's own failure line, with nothing around it: the whole error
+	// `curl -f`, a bad host or a refused connect leaves on stderr.
+	reCurlError = regexp.MustCompile(`^curl: \(\d+\)`)
 	// curl's own marker around a binary chunk in the verbose stream:
 	// `{ [1566 bytes data]`. Exact enough that no JSON body matches it.
 	reDataMark = regexp.MustCompile(`^[{}] \[\d+ bytes data\]\r?$`)
@@ -143,12 +147,12 @@ func takeMeter(line string, seenStatus bool) (string, bool) {
 	return dropMeter(line)
 }
 
-// Detect reports which curl shape the text is: "headers", "verbose", or ""
-// when it is not curl's to claim. The first line curl says anything on
-// decides — the progress meter in front of it is not a line curl says
-// anything on — and the rest of the text has to back it up: a status line
-// with no headers under it, or a `*` bullet list with no request and no
-// curl error in it, is somebody else's text.
+// Detect reports which curl shape the text is: "headers", "verbose",
+// "error", or "" when it is not curl's to claim. The first line curl
+// says anything on decides — the progress meter in front of it is not a
+// line curl says anything on — and the rest of the text has to back it
+// up: a status line with no headers under it, or a `*` bullet list with
+// no request and no curl error in it, is somebody else's text.
 func Detect(text string) string {
 	first := saying(text)
 	if first == "" {
@@ -167,11 +171,16 @@ func Detect(text string) string {
 			for _, seg := range strings.Split(line, "\r") {
 				// A connect that dies before the request still says
 				// `curl: (7)`, which no bullet list carries.
-				if reRequest.MatchString(unGlue(seg)) || strings.HasPrefix(seg, "curl: (") {
+				if reRequest.MatchString(unGlue(seg)) || strings.HasPrefix(unGlue(seg), "curl: (") {
 					return "verbose"
 				}
 			}
 		}
+	}
+	// A failure curl reported on its own — `curl -f`, a bad host — with
+	// no verbose stream around it.
+	if reCurlError.MatchString(first) {
+		return "error"
 	}
 	return ""
 }
@@ -227,19 +236,23 @@ func verboseError(line string) bool {
 	return false
 }
 
-// Format writes curl's text with its status, headers and noise made
-// scannable. sub comes from Detect; anything unrecognised — the body of a
-// plain GET, a JSON blob, a -w write-out — is written back byte for byte.
+// Format writes curl's text with its status, headers, failures and noise
+// made scannable. sub comes from Detect; anything unrecognised — the body
+// of a plain GET, a JSON blob, a -w write-out — is written back byte for
+// byte.
 func Format(w io.Writer, sub, text string) {
-	if text == "" || (sub != "headers" && sub != "verbose") {
+	if text == "" || (sub != "headers" && sub != "verbose" && sub != "error") {
 		io.WriteString(w, text)
 		return
 	}
-	if sub == "headers" {
+	switch sub {
+	case "headers":
 		formatHeaders(w, text)
-		return
+	case "verbose":
+		formatVerbose(w, text)
+	default:
+		formatError(w, text)
 	}
-	formatVerbose(w, text)
 }
 
 // Pipe is the detector's format hook.
@@ -327,6 +340,31 @@ func formatVerbose(w io.Writer, text string) {
 				line = tool.PaintColor(red, line)
 			default:
 				line = tool.PaintColor(dim, line)
+			}
+		}
+		io.WriteString(w, line)
+		io.WriteString(w, "\n")
+	}
+}
+
+// formatError handles a failure curl reported on its own line: the
+// meter that ran before it is dropped and the `curl: (n) …` line goes
+// bold red. Only meter before the error is touched — anything after it
+// is stdout, curl's own output, and stays byte for byte.
+func formatError(w io.Writer, text string) {
+	lines := splitLines(text)
+	seenError := false
+	for _, line := range lines {
+		if !seenError {
+			if cleaned, metered := takeMeter(line, false); metered {
+				if cleaned == "" {
+					continue
+				}
+				line = cleaned
+			}
+			if reCurlError.MatchString(line) {
+				seenError = true
+				line = tool.PaintColor(bold+" "+red, line)
 			}
 		}
 		io.WriteString(w, line)

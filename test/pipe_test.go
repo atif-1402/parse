@@ -1076,7 +1076,6 @@ func TestCurlDataFormsAreLeftAlone(t *testing.T) {
 	passthrough(t, "curl html body", "<!doctype html>\n<html><body>hi</body></html>\n")
 	passthrough(t, "curl json", `{"hello": "world"}`+"\n")
 	passthrough(t, "curl -w", "200\n")
-	passthrough(t, "curl error", "curl: (6) Could not resolve host: nonexistent.invalid\n")
 }
 
 // The progress meter rides in front of the headers when stderr and
@@ -1102,5 +1101,22 @@ func TestCurlMeterPrefixDoesNotBlockTheClaim(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("metered curl headers missing %q:\n%q", want, got)
 		}
+	}
+}
+
+// A bare `curl: (n)` failure with no -v around it is claimed and red.
+func TestCurlBareErrorIsClaimedInThePipe(t *testing.T) {
+	fix := lines(
+		`  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current`,
+		`                                 Dload  Upload  Total   Spent   Left   Speed`,
+		`curl: (6) Could not resolve host: nonexistent.invalid`,
+	)
+	got := throughCmd(fix)
+	if strings.Contains(got, "% Total") {
+		t.Errorf("progress meter must be dropped:\n%q", got)
+	}
+	want := "<bold red>curl: (6) Could not resolve host: nonexistent.invalid</>"
+	if !strings.Contains(got, want) {
+		t.Errorf("bare curl error missing %q:\n%q", want, got)
 	}
 }
