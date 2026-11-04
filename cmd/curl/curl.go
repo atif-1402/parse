@@ -9,9 +9,9 @@
 // curl's progress meter shares the stream: stderr is unbuffered, so in
 // `curl -I … 2>&1` the meter arrives before curl's buffered stdout, and in
 // `curl -v … 2>&1` a meter fragment can be glued to the next verbose line
-// without a line break (`0  0 … 0* using HTTP/2`). The meter is skipped
-// when claiming and dimmed like the rest of the noise; nothing is ever
-// deleted.
+// without a line break (`0  0 … 0* using HTTP/2`). The meter is dropped
+// from formatted output — it is chrome for a terminal, not content —
+// while everything curl actually says is kept byte for byte.
 package curl
 
 import (
@@ -47,6 +47,9 @@ var (
 	// when curl writes `0 … 0* using HTTP/2` in one go. At least one
 	// digit or space must sit in front, so a plain `* ` line is not one.
 	reMeterGlue = regexp.MustCompile(`^[0-9 ]+(\* |> |HTTP/)`)
+	// curl's own marker around a binary chunk in the verbose stream:
+	// `{ [1566 bytes data]`. Exact enough that no JSON body matches it.
+	reDataMark = regexp.MustCompile(`^[{}] \[\d+ bytes data\]\r?$`)
 )
 
 // isMeter reports whether one carriage-return fragment of the stream is
@@ -104,6 +107,40 @@ func saying(text string) string {
 		}
 	}
 	return ""
+}
+
+// dropMeter takes the progress meter out of a line. A line that is all
+// meter comes back empty — the caller drops it, newline and all — and a
+// fragment glued to a real line loses only the fragment:
+// `0 … 0* using HTTP/2` → `* using HTTP/2`. Lines without meter come
+// back untouched, byte for byte; metered reports whether any was found.
+func dropMeter(line string) (cleaned string, metered bool) {
+	if !isMeterLine(line) {
+		return line, false
+	}
+	var kept []string
+	for _, seg := range strings.Split(line, "\r") {
+		if seg == "" || isMeter(seg) {
+			continue
+		}
+		kept = append(kept, unGlue(seg))
+	}
+	if len(kept) == 0 {
+		return "", true
+	}
+	return strings.Join(kept, "\r"), true
+}
+
+// takeMeter removes the meter from a line while the meter can still be
+// where it belongs. Before the response line no body exists yet, so all
+// meter goes; after it, only lines still carrying carriage returns are
+// meter — curl rewrites its ticks in place — and a body line of digits
+// (LF-terminated, no ticks) must survive.
+func takeMeter(line string, seenStatus bool) (string, bool) {
+	if seenStatus && !strings.Contains(line, "\r") {
+		return line, false
+	}
+	return dropMeter(line)
 }
 
 // Detect reports which curl shape the text is: "headers", "verbose", or ""
@@ -223,13 +260,19 @@ func splitLines(text string) []string {
 // everything after the blank line — the body `-i` attaches — untouched.
 // A second status line restarts the header run, so a redirect chain
 // colors every hop. The progress meter that rides in front of the
-// response when stderr and stdout share a pipe is dimmed; it only ever
-// comes before the status line, so no body line can be mistaken for it.
+// response when stderr and stdout share a pipe is dropped: it only ever
+// comes before the status line, where no body can be mistaken for it.
 func formatHeaders(w io.Writer, text string) {
 	lines := splitLines(text)
 	inHeaders := true
 	seenStatus := false
 	for _, line := range lines {
+		if cleaned, metered := takeMeter(line, seenStatus); metered {
+			if cleaned == "" {
+				continue
+			}
+			line = cleaned
+		}
 		switch {
 		case strings.TrimRight(line, "\r") == "":
 			inHeaders = false
@@ -237,8 +280,6 @@ func formatHeaders(w io.Writer, text string) {
 			inHeaders = true
 			seenStatus = true
 			line = statusLine(line)
-		case !seenStatus && isMeterLine(line):
-			line = tool.PaintColor(dim, line)
 		case inHeaders && reHeader.MatchString(line):
 			if i := strings.Index(line, ":"); i > 0 {
 				line = tool.PaintColor(cyan, line[:i]) + line[i:]
@@ -249,21 +290,26 @@ func formatHeaders(w io.Writer, text string) {
 	}
 }
 
-// formatVerbose dims the `*`, `>` and `<` lines curl speaks in, colors a
-// status line wherever it appears, reds anything that reads as a failure
-// (including curl's own `curl: (6) …`), and lets the body that sits
-// between the headers and the closing lines pass through as it came.
-// The progress meter is dimmed too, but only before the response line:
-// a body line that happens to be all digits must not be touched, and the
-// meter only ever runs while the request is still under way.
+// formatVerbose dims the `*`, `>` and `<` lines curl speaks in and its
+// `{ … bytes data]` chunk markers, colors a status line wherever it
+// appears, reds anything that reads as a failure (including curl's own
+// `curl: (6) …`), and lets the body that sits between the headers and
+// the closing lines pass through as it came. The progress meter is
+// dropped where it can only be meter, as in formatHeaders.
 func formatVerbose(w io.Writer, text string) {
 	lines := splitLines(text)
 	seenStatus := false
 	for _, line := range lines {
+		if cleaned, metered := takeMeter(line, seenStatus); metered {
+			if cleaned == "" {
+				continue
+			}
+			line = cleaned
+		}
 		switch {
 		case strings.HasPrefix(line, "curl: ("):
 			line = tool.PaintColor(bold+" "+red, line)
-		case !seenStatus && isMeterLine(line):
+		case reDataMark.MatchString(line):
 			line = tool.PaintColor(dim, line)
 		case strings.HasPrefix(line, "* "), line == "*",
 			strings.HasPrefix(line, "> "), line == ">",

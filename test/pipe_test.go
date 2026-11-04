@@ -1080,7 +1080,8 @@ func TestCurlDataFormsAreLeftAlone(t *testing.T) {
 }
 
 // The progress meter rides in front of the headers when stderr and
-// stdout share the pipe (`curl -I … 2>&1`); it must not block the claim.
+// stdout share the pipe (`curl -I … 2>&1`); it must not block the claim,
+// and it must not reach the reader either.
 func TestCurlMeterPrefixDoesNotBlockTheClaim(t *testing.T) {
 	fix := "  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current\n" +
 		"                                 Dload  Upload  Total   Spent   Left   Speed\n" +
@@ -1090,8 +1091,10 @@ func TestCurlMeterPrefixDoesNotBlockTheClaim(t *testing.T) {
 		"\r\n" +
 		"<html><body>hi</body></html>\n"
 	got := throughCmd(fix)
+	if strings.Contains(got, "% Total") || strings.Contains(got, "Dload") {
+		t.Errorf("progress meter must be dropped:\n%q", got)
+	}
 	for _, want := range []string{
-		"<dim>  % Total",
 		"<bold green>HTTP/2 200 </>",
 		"<cyan>content-type</>: text/html",
 		"<html><body>hi</body></html>",

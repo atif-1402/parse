@@ -296,8 +296,9 @@ func stripPaint(s string) string {
 
 // The progress meter rides in front of the response when stderr and
 // stdout share a pipe (`curl -I … 2>&1`). It is skipped while claiming
-// and dimmed afterwards, and not one byte of it is deleted.
-func TestCurlMeterBeforeStatusIsSkippedAndDimmed(t *testing.T) {
+// and dropped afterwards — chrome for a terminal, not content — while
+// every line curl actually sent survives byte for byte.
+func TestCurlMeterBeforeStatusIsDropped(t *testing.T) {
 	fix := "  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current\n" +
 		"                                 Dload  Upload  Total   Spent   Left   Speed\n" +
 		"\r  0      0   0      0   0      0      0      0                              0\n" +
@@ -309,8 +310,12 @@ func TestCurlMeterBeforeStatusIsSkippedAndDimmed(t *testing.T) {
 		t.Fatalf("Detect = %q, want headers (meter must not block the claim)", got)
 	}
 	out := format(Detect(fix), fix)
+	for _, gone := range []string{"% Total", "Dload", "      0 "} {
+		if strings.Contains(out, gone) {
+			t.Errorf("meter %q must be dropped, not printed:\n%q", gone, out)
+		}
+	}
 	for _, want := range []string{
-		"<dim>  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current</>",
 		"<bold green>HTTP/2 200 </>",
 		"<cyan>content-type</>: text/html",
 	} {
@@ -318,17 +323,20 @@ func TestCurlMeterBeforeStatusIsSkippedAndDimmed(t *testing.T) {
 			t.Errorf("metered output missing %q:\n%q", want, out)
 		}
 	}
-	if stripPaint(out) != fix {
-		t.Errorf("output must be byte for byte:\ngot  %q\nwant %q", stripPaint(out), fix)
+	want := "HTTP/2 200 \ncontent-type: text/html\n\n"
+	if stripPaint(out) != want {
+		t.Errorf("everything curl sent must be byte for byte:\ngot  %q\nwant %q", stripPaint(out), want)
 	}
 }
 
-// A meter fragment glued to the next verbose line with no line break is
-// dimmed as meter — the `*` line glued to it would be dimmed anyway.
-func TestCurlMeterGluedToVerboseLineIsDimmed(t *testing.T) {
+// A meter fragment glued to the next verbose line with no line break
+// loses only the fragment — the `*` line under it comes out dimmed like
+// every other verbose line.
+func TestCurlMeterGluedToVerboseLineIsDropped(t *testing.T) {
 	fix := "  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current\n" +
 		"\r  0      0   0      0* using HTTP/2\n" +
 		"* Connected to example.com port 443 (#0)\n" +
+		"} [5 bytes data]\n" +
 		"> GET / HTTP/2\n" +
 		"< HTTP/2 200\n" +
 		"\n"
@@ -337,17 +345,27 @@ func TestCurlMeterGluedToVerboseLineIsDimmed(t *testing.T) {
 		t.Fatalf("Detect = %q, want verbose", got)
 	}
 	out := format(Detect(fix), fix)
+	if strings.Contains(out, "% Total") || strings.Contains(out, "0      0") {
+		t.Errorf("meter must be dropped:\n%q", out)
+	}
 	for _, want := range []string{
-		"<dim>\r  0      0   0      0* using HTTP/2</>",
+		"<dim>* using HTTP/2</>",
 		"<dim>* Connected to example.com port 443 (#0)</>",
+		"<dim>} [5 bytes data]</>",
 		"<bold green>< HTTP/2 200</>",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("glued meter output missing %q:\n%q", want, out)
 		}
 	}
-	if stripPaint(out) != fix {
-		t.Errorf("output must be byte for byte:\ngot  %q\nwant %q", stripPaint(out), fix)
+	want := "* using HTTP/2\n" +
+		"* Connected to example.com port 443 (#0)\n" +
+		"} [5 bytes data]\n" +
+		"> GET / HTTP/2\n" +
+		"< HTTP/2 200\n" +
+		"\n"
+	if stripPaint(out) != want {
+		t.Errorf("everything curl said must be byte for byte:\ngot  %q\nwant %q", stripPaint(out), want)
 	}
 }
 
@@ -377,5 +395,41 @@ func TestCurlVerifiedCertificateStaysDim(t *testing.T) {
 	}
 	if !strings.Contains(out, "<dim>* SSL certificate verified via OpenSSL.</>") {
 		t.Errorf("verified certificate not dimmed:\n%q", out)
+	}
+}
+
+// After the response, meter ticks still ride in as carriage-returned
+// rewrites and are dropped — while a body line that is all digits but
+// carries no tick is data and comes through untouched.
+func TestCurlMeterAfterStatusDropsButDigitBodyStays(t *testing.T) {
+	fix := "* Connected to example.com port 443 (#0)\n" +
+		"> GET / HTTP/2\n" +
+		"< HTTP/2 200 \n" +
+		"< content-type: text/plain\n" +
+		"\n" +
+		"\r100    577   0    577   0      0   4764      0                              0\r100    577   0    577   0      0   4762      0                              0\n" +
+		"100\n" +
+		"42\n" +
+		"* Connection #0 to host example.com:443 left intact\n"
+
+	out := format("verbose", fix)
+	if strings.Contains(out, "4764") || strings.Contains(out, "4762") {
+		t.Errorf("meter ticks must be dropped:\n%q", out)
+	}
+	for _, want := range []string{"<bold green>< HTTP/2 200 </>", "100\n42\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%q", want, out)
+		}
+	}
+	want := "* Connected to example.com port 443 (#0)\n" +
+		"> GET / HTTP/2\n" +
+		"< HTTP/2 200 \n" +
+		"< content-type: text/plain\n" +
+		"\n" +
+		"100\n" +
+		"42\n" +
+		"* Connection #0 to host example.com:443 left intact\n"
+	if stripPaint(out) != want {
+		t.Errorf("body must be byte for byte:\ngot  %q\nwant %q", stripPaint(out), want)
 	}
 }
