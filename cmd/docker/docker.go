@@ -1,9 +1,10 @@
 // Package docker formats docker output. Four subcommands are understood:
 // `docker ps` (and `ps -a`), whose table gets a bold heading, a STATUS tinted
 // by state and a tinted published port; `docker inspect` — and the JSON of
-// `docker network inspect` and `docker image inspect` alike — whose array
-// gets split by shape into containers, networks and images, each rendered
-// with colored keys, values and a few state-aware fields;
+// `docker network inspect`, `docker image inspect` and `docker volume
+// inspect` alike — whose array gets split by shape into containers,
+// networks, images and volumes, each rendered with colored keys, values
+// and a few state-aware fields;
 // `docker info`, whose client and server sections become one summary with
 // warnings kept verbatim; and `docker system df`, whose summary and tables
 // are normalized. Every other subcommand, including the machine forms of
@@ -129,6 +130,13 @@ func runInspectDirect(args []string) int {
 	imageForm := len(args) >= 2 && args[0] == "image" && args[1] == "inspect"
 	if imageForm {
 		dockerArgs = []string{"image", "inspect"}
+		args = args[1:]
+	}
+	volumeForm := len(args) >= 2 && args[0] == "volume" && args[1] == "inspect"
+	if volumeForm {
+		// Without this the loop below would build `docker inspect
+		// volume <name>`, which inspects an object *called* volume.
+		dockerArgs = []string{"volume", "inspect"}
 		args = args[1:]
 	}
 	for _, a := range args {
@@ -391,7 +399,8 @@ func looksLikeInspect(text string) bool {
 	for _, obj := range arr {
 		if hasAllKeys(obj, "Id", "State", "Config") ||
 			hasAllKeys(obj, "Driver", "IPAM") ||
-			imageObject(obj) {
+			imageObject(obj) ||
+			volumeObject(obj) {
 			return true
 		}
 	}
@@ -513,6 +522,9 @@ func inspectObjectBlock(obj map[string]interface{}, show bool) (string, bool) {
 			return out, true
 		}
 		return rawJSONObject(obj), false
+	}
+	if volumeObject(obj) {
+		return volumeInspectBlock(obj)
 	}
 	return rawJSONObject(obj), false
 }

@@ -931,3 +931,69 @@ func TestDockerInfoNonInfoIsLeftAlone(t *testing.T) {
 		`no docker here`,
 	))
 }
+
+// -- docker volume inspect --
+
+func volumeJSONFixture() string {
+	return lines(
+		`[`,
+		`    {`,
+		`        "CreatedAt": "2026-10-09T19:36:19+05:30",`,
+		`        "Driver": "local",`,
+		`        "Labels": null,`,
+		`        "Mountpoint": "/var/lib/docker/volumes/parse-demo/_data",`,
+		`        "Name": "parse-demo",`,
+		`        "Options": null,`,
+		`        "Scope": "local"`,
+		`    }`,
+		`]`,
+	)
+}
+
+// Volume inspect JSON is claimed by keys only volumes print — Name plus
+// Mountpoint plus Scope — and comes out as the summary.
+func TestDockerVolumeInspectIsClaimedInThePipe(t *testing.T) {
+	got := throughCmd(volumeJSONFixture())
+	for _, want := range []string{
+		"volume parse-demo",
+		"local · scope local",
+		"mountpoint /var/lib/docker/volumes/parse-demo/_data",
+		"created    2026-10-09T19:36:19+05:30",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("volume inspect JSON was not claimed, missing %q:\n%q", want, got)
+		}
+	}
+	if strings.Contains(got, `"Name"`) {
+		t.Errorf("raw volume JSON leaked:\n%q", got)
+	}
+}
+
+// Black box, the real binary: same render through `docker volume inspect | parse`.
+func TestDockerVolumeInspectFormatsThePipe(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go toolchain")
+	}
+	got := runParse(t, volumeJSONFixture())
+	for _, want := range []string{
+		"volume parse-demo  local · scope local",
+		"mountpoint /var/lib/docker/volumes/parse-demo/_data",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("piped volume inspect missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// The machine forms and the volume list are left alone: --format output,
+// the empty array a missing name produces, and `docker volume ls`.
+func TestDockerVolumeInspectFormsAreLeftAlone(t *testing.T) {
+	passthrough(t, "volume inspect --format",
+		"/var/lib/docker/volumes/parse-demo/_data\n")
+	passthrough(t, "volume missing", "[]\n")
+	passthrough(t, "volume ls", lines(
+		`DRIVER    VOLUME NAME`,
+		`local     fx-vol-unused`,
+		`local     parse-demo`,
+	))
+}
