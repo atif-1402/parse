@@ -117,7 +117,7 @@ Run `parse -l` to see every supported command and what it changes, or `parse -h`
 | **lsblk** | device tree dimmed, wrapped mountpoints indented |
 | **kubectl** | *experimental*, see [below](#kubectl-experimental) |
 | **docker** | `ps`: names bold, STATE colored by state with exit codes and uptime; `inspect`: semantic sections (state, network, ports, env with secrets masked — `--show-secrets` reveals real values); `network inspect`: name/driver/scope/subnet header, attached containers as a NAME/IPv4/MAC table sorted by name, empty networks get one dim line; `system df`: size-ordered summary (build cache included; `-v` pipe sums marked `~`, direct mode re-runs plain df for exact totals), tables sorted by size then state then name, sizes normalized, unused/dangling tagged, `-v` containers reduced to NAME/STATE/SIZE with empty ones on one dim line, `-v` build cache collapsed to one line (`--all` shows the rows) |
-| **curl** | `-I`/`-i`: status line colored by code (2xx green, 3xx yellow, 4xx/5xx red), header keys cyan, body untouched; `-v`: verbose noise dimmed, failures red, response status still colored |
+| **curl** | `-I`/`-i`: status line colored by code (2xx green, 3xx yellow, 4xx/5xx red), header keys cyan, body untouched; `-v`: verbose noise dimmed, failures red, response status still colored, `{ … bytes data]` markers dimmed; the progress meter is dropped from piped output |
 
 Everything else a tool can do runs unchanged. Mutating commands (`systemctl start`, `git commit`, `kubectl apply`, ...) are never altered.
 
