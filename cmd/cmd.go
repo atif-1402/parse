@@ -12,6 +12,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/atif-1402/parse/cmd/curl"
 	"github.com/atif-1402/parse/cmd/docker"
 	"github.com/atif-1402/parse/cmd/du"
 	"github.com/atif-1402/parse/cmd/find"
@@ -55,6 +56,9 @@ func Ps(args []string) int { return ps.Run(args) }
 
 // Docker implements `parse docker <args>`.
 func Docker(args []string) int { return docker.Run(args) }
+
+// Curl implements `parse curl <args>`.
+func Curl(args []string) int { return curl.Run(args) }
 
 // Find implements `parse find <args>`.
 func Find(args []string) int { return find.Run(args) }
@@ -258,6 +262,10 @@ var detectors = []detector{
 		},
 		format: func(w io.Writer, sub, text string) { journalctl.Format(w, text) },
 	},
+	// curl's response opens with an HTTP status line and its verbose stream
+	// opens with "* " plus a request line or a `curl: (n)` error — shapes no
+	// table, log or JSON parse knows prints.
+	{tool: "curl", detect: curl.Detect, format: curl.Pipe},
 	// Before lsblk: both tables open with a capitalised NAME column, and the
 	// kubectl detector is the one that insists on a column lsblk never prints.
 	{tool: "systemctl", detect: systemctl.Detect, format: systemctl.Format},

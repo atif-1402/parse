@@ -1,0 +1,302 @@
+// Package curl formats curl's output. Two shapes are worth formatting and
+// both are claimed only from their opening line: a response's status line
+// with headers under it (`curl -I`, `-i`), where the status gets a color
+// by code and the header keys go cyan; and curl's own verbose stream
+// (`curl -v … 2>&1`), where the wall of `*` lines is dimmed, the response
+// status still colored, and failures red. Bodies, JSON, `-w` write-outs
+// and every other form pass through byte for byte.
+//
+// curl's progress meter shares the stream: stderr is unbuffered, so in
+// `curl -I … 2>&1` the meter arrives before curl's buffered stdout, and in
+// `curl -v … 2>&1` a meter fragment can be glued to the next verbose line
+// without a line break (`0  0 … 0* using HTTP/2`). The meter is skipped
+// when claiming and dimmed like the rest of the noise; nothing is ever
+// deleted.
+package curl
+
+import (
+	"io"
+	"os"
+	"regexp"
+	"strings"
+
+	"github.com/atif-1402/parse/internal/tool"
+)
+
+const (
+	bold   = tool.Bold
+	red    = tool.Red
+	green  = tool.Green
+	yellow = tool.Yellow
+	cyan   = tool.Cyan
+	dim    = tool.Dim
+)
+
+var (
+	// HTTP/2 200, HTTP/1.1 404 Not Found, HTTP/3 200 …
+	reStatus = regexp.MustCompile(`^HTTP/\d+(\.\d+)? \d{3}`)
+	// A header line: a run of non-space printable chars, a colon, then
+	// the value (which may be empty).
+	reHeader = regexp.MustCompile(`^[!-~]+:( .*)?$`)
+	// The request line curl's verbose stream prints: `> GET / HTTP/1.1`.
+	reRequest = regexp.MustCompile(`^> [A-Z][A-Z0-9-]* \S+ HTTP/\d`)
+	// One progress-meter update: a run of digits and spaces, rewritten in
+	// place with carriage returns, e.g. `  0      0   0      0 …`.
+	reMeterDigits = regexp.MustCompile(`^[0-9 ]+$`)
+	// A meter fragment glued in front of a real line with no break, as
+	// when curl writes `0 … 0* using HTTP/2` in one go. At least one
+	// digit or space must sit in front, so a plain `* ` line is not one.
+	reMeterGlue = regexp.MustCompile(`^[0-9 ]+(\* |> |HTTP/)`)
+)
+
+// isMeter reports whether one carriage-return fragment of the stream is
+// the progress meter rather than something curl is saying. The meter's
+// two header lines name their columns, so they are matched by content.
+func isMeter(seg string) bool {
+	t := strings.TrimSpace(seg)
+	if t == "" {
+		return false
+	}
+	if strings.HasPrefix(t, "% Total") || strings.Contains(t, "Dload") {
+		return true
+	}
+	return reMeterDigits.MatchString(t)
+}
+
+// isMeterLine reports whether a whole newline line is meter: every one of
+// its carriage-return fragments is meter, or a fragment glued to what
+// follows it (`0  0* using HTTP/2` — the `*` line there would be dimmed
+// on its own anyway).
+func isMeterLine(line string) bool {
+	heard := false
+	for _, seg := range strings.Split(line, "\r") {
+		if seg == "" {
+			continue
+		}
+		heard = true
+		if !isMeter(seg) && !reMeterGlue.MatchString(seg) {
+			return false
+		}
+	}
+	return heard
+}
+
+// unGlue strips a meter fragment written without a line break in front of
+// a real line, so `0  0 … 0HTTP/2 200` can still be read as a status
+// line. Lines that do not start with a fragment come back unchanged.
+func unGlue(line string) string {
+	if m := reMeterGlue.FindStringSubmatch(line); m != nil {
+		return line[len(m[0])-len(m[1]):]
+	}
+	return line
+}
+
+// saying returns the first line curl actually says something on: meter
+// lines and empty lines are skipped, and a meter fragment glued to the
+// line is taken off the front.
+func saying(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		for _, seg := range strings.Split(line, "\r") {
+			if seg == "" || isMeter(seg) {
+				continue
+			}
+			return unGlue(seg)
+		}
+	}
+	return ""
+}
+
+// Detect reports which curl shape the text is: "headers", "verbose", or ""
+// when it is not curl's to claim. The first line curl says anything on
+// decides — the progress meter in front of it is not a line curl says
+// anything on — and the rest of the text has to back it up: a status line
+// with no headers under it, or a `*` bullet list with no request and no
+// curl error in it, is somebody else's text.
+func Detect(text string) string {
+	first := saying(text)
+	if first == "" {
+		return ""
+	}
+	if reStatus.MatchString(first) {
+		for _, line := range strings.Split(text, "\n") {
+			if reHeader.MatchString(line) {
+				return "headers"
+			}
+		}
+		return ""
+	}
+	if strings.HasPrefix(first, "* ") {
+		for _, line := range strings.Split(text, "\n") {
+			for _, seg := range strings.Split(line, "\r") {
+				// A connect that dies before the request still says
+				// `curl: (7)`, which no bullet list carries.
+				if reRequest.MatchString(unGlue(seg)) || strings.HasPrefix(seg, "curl: (") {
+					return "verbose"
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// statusCode pulls the code out of a status line: "HTTP/1.1 404 Not
+// Found" → "404". Empty when the line is not one.
+func statusCode(line string) string {
+	fields := strings.Fields(line)
+	if len(fields) >= 2 && strings.HasPrefix(fields[0], "HTTP/") && len(fields[1]) == 3 {
+		return fields[1]
+	}
+	return ""
+}
+
+// statusColor maps a code to parse's traffic lights: 2xx green, 3xx
+// yellow, 4xx and 5xx red.
+func statusColor(code string) string {
+	switch code[0] {
+	case '2':
+		return green
+	case '3':
+		return yellow
+	default:
+		return red
+	}
+}
+
+// statusLine paints a whole status line in its code's color, bold.
+func statusLine(line string) string {
+	code := statusCode(line)
+	if code == "" {
+		return line
+	}
+	return tool.PaintColor(bold+" "+statusColor(code), line)
+}
+
+// verboseError reports whether a verbose line is a failure rather than
+// progress. The list is phrases curl only writes when something went
+// wrong; normal lines like "SSL connection using TLS1.3" and success
+// lines like "SSL certificate verified via OpenSSL." stay out of it —
+// "failed" is what carries certificate failures.
+func verboseError(line string) bool {
+	l := strings.ToLower(line)
+	for _, p := range []string{
+		"refused", "failed", "error", "timed out",
+		"could not resolve", "couldn't resolve", "empty reply",
+		"reset by peer", "no route",
+	} {
+		if strings.Contains(l, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// Format writes curl's text with its status, headers and noise made
+// scannable. sub comes from Detect; anything unrecognised — the body of a
+// plain GET, a JSON blob, a -w write-out — is written back byte for byte.
+func Format(w io.Writer, sub, text string) {
+	if text == "" || (sub != "headers" && sub != "verbose") {
+		io.WriteString(w, text)
+		return
+	}
+	if sub == "headers" {
+		formatHeaders(w, text)
+		return
+	}
+	formatVerbose(w, text)
+}
+
+// Pipe is the detector's format hook.
+func Pipe(w io.Writer, sub, text string) { Format(w, sub, text) }
+
+// splitLines cuts the text into the lines to walk, dropping only the one
+// empty element a trailing newline leaves behind — a blank line at the
+// end of the stream is a line of the stream and comes back out.
+func splitLines(text string) []string {
+	lines := strings.Split(text, "\n")
+	if n := len(lines); n > 0 && lines[n-1] == "" {
+		lines = lines[:n-1]
+	}
+	return lines
+}
+
+// formatHeaders colors the status line and the header keys, and leaves
+// everything after the blank line — the body `-i` attaches — untouched.
+// A second status line restarts the header run, so a redirect chain
+// colors every hop. The progress meter that rides in front of the
+// response when stderr and stdout share a pipe is dimmed; it only ever
+// comes before the status line, so no body line can be mistaken for it.
+func formatHeaders(w io.Writer, text string) {
+	lines := splitLines(text)
+	inHeaders := true
+	seenStatus := false
+	for _, line := range lines {
+		switch {
+		case strings.TrimRight(line, "\r") == "":
+			inHeaders = false
+		case reStatus.MatchString(line):
+			inHeaders = true
+			seenStatus = true
+			line = statusLine(line)
+		case !seenStatus && isMeterLine(line):
+			line = tool.PaintColor(dim, line)
+		case inHeaders && reHeader.MatchString(line):
+			if i := strings.Index(line, ":"); i > 0 {
+				line = tool.PaintColor(cyan, line[:i]) + line[i:]
+			}
+		}
+		io.WriteString(w, line)
+		io.WriteString(w, "\n")
+	}
+}
+
+// formatVerbose dims the `*`, `>` and `<` lines curl speaks in, colors a
+// status line wherever it appears, reds anything that reads as a failure
+// (including curl's own `curl: (6) …`), and lets the body that sits
+// between the headers and the closing lines pass through as it came.
+// The progress meter is dimmed too, but only before the response line:
+// a body line that happens to be all digits must not be touched, and the
+// meter only ever runs while the request is still under way.
+func formatVerbose(w io.Writer, text string) {
+	lines := splitLines(text)
+	seenStatus := false
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "curl: ("):
+			line = tool.PaintColor(bold+" "+red, line)
+		case !seenStatus && isMeterLine(line):
+			line = tool.PaintColor(dim, line)
+		case strings.HasPrefix(line, "* "), line == "*",
+			strings.HasPrefix(line, "> "), line == ">",
+			strings.HasPrefix(line, "< "), line == "<":
+			inner := strings.TrimPrefix(line, "* ")
+			inner = strings.TrimPrefix(inner, "> ")
+			inner = strings.TrimPrefix(inner, "< ")
+			switch {
+			case reStatus.MatchString(inner):
+				if code := statusCode(inner); code != "" {
+					seenStatus = true
+					line = tool.PaintColor(bold+" "+statusColor(code), line)
+				}
+			case verboseError(line):
+				line = tool.PaintColor(red, line)
+			default:
+				line = tool.PaintColor(dim, line)
+			}
+		}
+		io.WriteString(w, line)
+		io.WriteString(w, "\n")
+	}
+}
+
+// Run implements `parse curl <args>`. Only stdout is formatted, and only
+// when it is a response; stderr stays on stderr, so `parse curl -v` shows
+// curl's verbose stream raw on the terminal while `curl -v … 2>&1 | parse`
+// formats the combined text on the pipe. Docker's exit code is curl's.
+func Run(args []string) int {
+	text, code, started := tool.Capture("curl", args)
+	if !started {
+		return code
+	}
+	Format(os.Stdout, Detect(text), text)
+	return code
+}

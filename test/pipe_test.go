@@ -997,3 +997,107 @@ func TestDockerVolumeInspectFormsAreLeftAlone(t *testing.T) {
 		`local     parse-demo`,
 	))
 }
+
+// -- curl --
+
+// curlHeadersFixture is `curl -I` output: status line, headers, blank
+// line, body.
+func curlHeadersFixture() string {
+	return lines(
+		`HTTP/2 200`,
+		`content-type: text/html; charset=UTF-8`,
+		`content-length: 1256`,
+		`server: ECA`,
+		``,
+		`<!doctype html>`,
+		`<html><body>hi</body></html>`,
+	)
+}
+
+// Response headers are claimed: the status line gets its code's color,
+// the keys go cyan, and the body survives untouched.
+func TestCurlHeadersAreClaimedInThePipe(t *testing.T) {
+	got := throughCmd(curlHeadersFixture())
+	for _, want := range []string{
+		"<bold green>HTTP/2 200</>",
+		"<cyan>content-type</>: text/html; charset=UTF-8",
+		"<!doctype html>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("curl headers were not claimed, missing %q:\n%q", want, got)
+		}
+	}
+}
+
+// curl's verbose stream is claimed too: noise dimmed, status colored.
+func TestCurlVerboseIsClaimedInThePipe(t *testing.T) {
+	fix := lines(
+		`* Trying 93.184.216.34:443...`,
+		`* Connected to example.com (93.184.216.34) port 443 (#0)`,
+		`> GET / HTTP/2`,
+		`> Host: example.com`,
+		`< HTTP/2 200`,
+		`< content-type: text/html`,
+		``,
+		`<html>body</html>`,
+	)
+	got := throughCmd(fix)
+	for _, want := range []string{
+		"<dim>* Trying 93.184.216.34:443...</>",
+		"<bold green>< HTTP/2 200</>",
+		"<html>body</html>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("curl verbose was not claimed, missing %q:\n%q", want, got)
+		}
+	}
+}
+
+// Black box, the real binary: the same render through `curl -I | parse`.
+func TestCurlFormatsThePipe(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("no go toolchain")
+	}
+	got := runParse(t, curlHeadersFixture())
+	for _, want := range []string{
+		"HTTP/2 200",
+		"content-type: text/html; charset=UTF-8",
+		"<!doctype html>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("piped curl headers missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// What a script or a server sends as data is left alone: an HTML body,
+// JSON, a -w write-out and a lone curl error all come back byte for byte.
+func TestCurlDataFormsAreLeftAlone(t *testing.T) {
+	passthrough(t, "curl html body", "<!doctype html>\n<html><body>hi</body></html>\n")
+	passthrough(t, "curl json", `{"hello": "world"}`+"\n")
+	passthrough(t, "curl -w", "200\n")
+	passthrough(t, "curl error", "curl: (6) Could not resolve host: nonexistent.invalid\n")
+}
+
+// The progress meter rides in front of the headers when stderr and
+// stdout share the pipe (`curl -I … 2>&1`); it must not block the claim.
+func TestCurlMeterPrefixDoesNotBlockTheClaim(t *testing.T) {
+	fix := "  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current\n" +
+		"                                 Dload  Upload  Total   Spent   Left   Speed\n" +
+		"\r  0      0   0      0   0      0      0      0                              0\n" +
+		"HTTP/2 200 \r\n" +
+		"content-type: text/html\r\n" +
+		"\r\n" +
+		"<html><body>hi</body></html>\n"
+	got := throughCmd(fix)
+	for _, want := range []string{
+		"<dim>  % Total",
+		"<bold green>HTTP/2 200 </>",
+		"<cyan>content-type</>: text/html",
+		"<html><body>hi</body></html>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("metered curl headers missing %q:\n%q", want, got)
+		}
+	}
+}
