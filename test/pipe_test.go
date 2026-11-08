@@ -1121,8 +1121,9 @@ func TestCurlBareErrorIsClaimedInThePipe(t *testing.T) {
 	}
 }
 
-// mount's rows are claimed by their shape: the filesystem type gets its
-// color and the options are quietened, with a read-only mount marked.
+// mount's rows are claimed by their shape and lined up into a table: the
+// filesystem type gets its color and the options are quietened, with a
+// read-only mount marked.
 func TestMountRowsAreClaimedInThePipe(t *testing.T) {
 	got := throughCmd(lines(
 		`proc on /proc type proc (rw,nosuid,nodev,noexec,relatime)`,
@@ -1130,6 +1131,8 @@ func TestMountRowsAreClaimedInThePipe(t *testing.T) {
 		`none on /run/credentials/x.service type tmpfs (ro,nosuid,nodev,mode=700)`,
 	))
 	for _, want := range []string{
+		"<bold>DEVICE</>",
+		"<bold>MOUNTPOINT</>",
 		"<dim>proc</>",
 		"<cyan>btrfs</>",
 		"<dim>rw,nosuid,nodev,noexec,relatime</>",
@@ -1139,9 +1142,14 @@ func TestMountRowsAreClaimedInThePipe(t *testing.T) {
 			t.Errorf("mount output missing %q:\n%q", want, got)
 		}
 	}
-	// The anchor keeps its bytes.
-	if !strings.Contains(got, "/dev/mapper/root on / type <cyan>btrfs</>") {
+	// The anchor keeps its bytes: /dev/mapper/root in the 16-wide column,
+	// the / in the 26-wide mountpoint column, btrfs in the 6-wide one.
+	if !strings.Contains(got, "/dev/mapper/root  /"+strings.Repeat(" ", 27)+"<cyan>btrfs</>   <dim>rw,relatime,compress=zstd:3,ssd</>") {
 		t.Errorf("the mountpoint moved or got painted:\n%q", got)
+	}
+	// The glue words are gone — that is what makes it a table.
+	if strings.Contains(got, " on / type ") {
+		t.Errorf("the glue words survived:\n%q", got)
 	}
 }
 

@@ -2,10 +2,10 @@
 // mount with no alignment at all: the options are the widest thing on the
 // screen and say almost the same thing on every row, and the filesystem
 // type — the one word that says what this mount actually is — sits buried
-// between "on" and "type". parse moves no bytes: the device and the
-// mountpoint keep their places as the row's anchor, the filesystem type is
-// colored by where its data lives, the options are quietened, and a
-// read-only mount is marked so it stands out.
+// between "on" and "type". parse lines the rows up into a table instead:
+// a column each for the device, the mountpoint, the filesystem type and
+// the options, the type colored by where its data lives, the options
+// quietened, and a read-only mount marked so it stands out.
 package mount
 
 import (
@@ -18,6 +18,7 @@ import (
 )
 
 const (
+	bold   = tool.Bold
 	yellow = tool.Yellow
 	dim    = tool.Dim
 )
@@ -58,11 +59,144 @@ func Detect(text string) string {
 	return ""
 }
 
-// Format paints mount's rows and prints them back exactly where mount put
-// them. A line that is not one of mount's rows — an error that leaked
-// onto stdout, a label in a shape this regex never met — is written back
-// untouched, so a claimed text is never half painted and half wrong.
+// Format lines mount's rows up into a table: a heading, then one row per
+// mount with a column each for the device, the mountpoint, the filesystem
+// type and the options. Every field mount printed survives — only the
+// words "on" and "type" and the padding are gone.
+//
+// When some line is not one of mount's rows, the table is abandoned and
+// each line is painted on its own instead: an error that leaked onto
+// stdout is never lined up as though it were a mount.
 func Format(w io.Writer, text string) {
+	lines := strings.Split(text, "\n")
+	if last := len(lines) - 1; lines[last] == "" {
+		lines = lines[:last]
+	}
+	rows := make([]mrow, 0, len(lines))
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		r, ok := parseRow(line)
+		if !ok {
+			paintPlain(w, text)
+			return
+		}
+		rows = append(rows, r)
+	}
+	if len(rows) == 0 {
+		io.WriteString(w, text)
+		return
+	}
+	writeTable(w, rows)
+}
+
+// mrow is one line of mount's output taken apart: everything the reader
+// needs, with the glue words dropped and the `mount -l` label kept.
+type mrow struct {
+	dev, mnt, fs, opts, label string
+}
+
+// parseRow takes one line of mount's output apart, or reports that it is
+// not one of mount's rows.
+func parseRow(line string) (mrow, bool) {
+	m := reMount.FindStringSubmatch(line)
+	if m == nil {
+		return mrow{}, false
+	}
+	return mrow{
+		dev:   m[1],
+		mnt:   m[2],
+		fs:    m[3],
+		opts:  m[4],
+		label: strings.TrimSpace(m[5]),
+	}, true
+}
+
+// cells is the row as columns. The label column only exists when some row
+// actually has a label, so a plain `mount` never grows an empty one.
+func (r mrow) cells(withLabel bool) []string {
+	if withLabel {
+		return []string{r.dev, r.mnt, r.fs, r.opts, r.label}
+	}
+	return []string{r.dev, r.mnt, r.fs, r.opts}
+}
+
+// writeTable prints the heading and one line per mount. Each column is as
+// wide as its widest cell, two spaces sit between columns, and the last
+// column is never padded, so no line ends in spaces.
+func writeTable(w io.Writer, rows []mrow) {
+	withLabel := false
+	for _, r := range rows {
+		if r.label != "" {
+			withLabel = true
+			break
+		}
+	}
+	headers := []string{"DEVICE", "MOUNTPOINT", "FSTYPE", "OPTIONS"}
+	if withLabel {
+		headers = append(headers, "LABEL")
+	}
+
+	widths := make([]int, len(headers))
+	for i, h := range headers {
+		widths[i] = len([]rune(h))
+	}
+	for _, r := range rows {
+		for i, c := range r.cells(withLabel) {
+			if n := len([]rune(c)); n > widths[i] {
+				widths[i] = n
+			}
+		}
+	}
+
+	var sb strings.Builder
+	writeCells(&sb, headers, widths, func(_ int, s string) string {
+		return tool.PaintColor(bold, s)
+	})
+	for _, r := range rows {
+		writeCells(&sb, r.cells(withLabel), widths, paintCell)
+	}
+	io.WriteString(w, sb.String())
+}
+
+// writeCells writes one line: every cell painted by paint and padded to
+// its column, two spaces between columns and none after the last.
+func writeCells(sb *strings.Builder, cells []string, widths []int, paint func(col int, s string) string) {
+	for i, c := range cells {
+		if i > 0 {
+			sb.WriteString("  ")
+		}
+		sb.WriteString(paint(i, c))
+		if i < len(cells)-1 {
+			if pad := widths[i] - len([]rune(c)); pad > 0 {
+				sb.WriteString(strings.Repeat(" ", pad))
+			}
+		}
+	}
+	sb.WriteString("\n")
+}
+
+// paintCell is the color of one column: the filesystem type by where its
+// data lives and the options quietened with a read-only one marked. The
+// device, the mountpoint and the label are the row's data and stay exactly
+// as mount printed them.
+func paintCell(col int, s string) string {
+	switch col {
+	case 2:
+		if color := tool.FsColor(s); color != "" {
+			return tool.PaintColor(color, s)
+		}
+	case 3:
+		return paintOptions(s)
+	}
+	return s
+}
+
+// paintPlain is the fallback for text some line of which is not a mount
+// row: every row is painted where it stands and anything else comes back
+// untouched, so a claimed text is never half a table and half a lie.
+func paintPlain(w io.Writer, text string) {
 	for i, line := range strings.Split(text, "\n") {
 		if i > 0 {
 			io.WriteString(w, "\n")
@@ -71,10 +205,9 @@ func Format(w io.Writer, text string) {
 	}
 }
 
-// row colors one line of the mount table. The line is rebuilt from the
-// regex's spans, so everything outside the filesystem type and the
-// options — device, " on ", mountpoint, " type ", brackets, label — comes
-// back byte for byte.
+// row colors one line of the mount table in place: the filesystem type by
+// where its data lives, the options quietened with a read-only one marked.
+// Everything else comes back byte for byte.
 func row(line string) string {
 	idx := reMount.FindStringSubmatchIndex(line)
 	if idx == nil {

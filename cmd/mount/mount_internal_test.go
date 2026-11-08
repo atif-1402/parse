@@ -1,7 +1,8 @@
-// Tests for the mount helpers: the row shape mount always prints, and the
-// colors it gets. The samples are mount's own words, copied as it printed
-// them — kernel plumbing, a btrfs root, a read-only credential tmpfs, a
-// label after the brackets and a mountpoint holding a space.
+// Tests for the mount helpers: the row shape mount always prints, the
+// table parse lines it up into, and the colors it gets. The samples are
+// mount's own words, copied as it printed them — kernel plumbing, a btrfs
+// root, a read-only credential tmpfs, a label after the brackets and a
+// mountpoint holding a space.
 package mount
 
 import (
@@ -42,7 +43,7 @@ sys on /sys type sysfs (rw,nosuid,nodev,noexec,relatime)
 /dev/nvme0n1p2 on /boot type ext4 (rw,relatime)
 `
 
-const readOnlySample = `none on /run/credentials/systemd-journald.service type tmpfs (ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,mode=700,inode64,huge=advise)
+const readOnlySample = `none on /run/credentials/systemd-journald.service type tmpfs (ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,mode=700,inode64,huge=advise,noswap)
 `
 
 const loneReadOnlySample = `none on /sys/firmware/efi/efivars type efivarfs (ro,nosuid,nodev,noexec,relatime)
@@ -55,6 +56,14 @@ const spaceSample = `//nas.example.com/share on /mnt/Backup Share type cifs (rw,
 `
 
 const unknownFsSample = `fuse.gocryptfs on /home/atif/private type fuse.gocryptfs (rw,nosuid,nodev,relatime,user_id=1000,group_id=1000)
+`
+
+// Three rows small enough to hold the whole table, including its padding,
+// in one expectation. Column widths are DEVICE 16, MOUNTPOINT 26, FSTYPE 6,
+// and OPTIONS is last so it is never padded.
+const threeRowSample = `proc on /proc type proc (rw,nosuid)
+/dev/mapper/root on / type btrfs (rw,relatime,compress=zstd:3)
+none on /run/credentials/x.service type tmpfs (ro,nosuid,nodev,mode=700)
 `
 
 func TestDetectClaimsMountRows(t *testing.T) {
@@ -95,18 +104,56 @@ func TestDetectLeavesOtherOutputAlone(t *testing.T) {
 	}
 }
 
-func TestFormatPrintsEveryByteBack(t *testing.T) {
+// The whole table, padding and all, for a sample small enough to write
+// out. Every column starts where the heading puts it.
+func TestFormatLinesTheRowsUpAsATable(t *testing.T) {
+	want := "<bold>DEVICE</>" + strings.Repeat(" ", 12) +
+		"<bold>MOUNTPOINT</>" + strings.Repeat(" ", 18) +
+		"<bold>FSTYPE</>" + "  " +
+		"<bold>OPTIONS</>\n" +
+		"proc" + strings.Repeat(" ", 14) + "/proc" + strings.Repeat(" ", 23) + "<dim>proc</>" + strings.Repeat(" ", 4) + "<dim>rw,nosuid</>\n" +
+		"/dev/mapper/root  /" + strings.Repeat(" ", 27) + "<cyan>btrfs</>" + strings.Repeat(" ", 3) + "<dim>rw,relatime,compress=zstd:3</>\n" +
+		"none" + strings.Repeat(" ", 14) + "/run/credentials/x.service  " + "<dim>tmpfs</>" + strings.Repeat(" ", 3) + "<yellow>ro</><dim>,nosuid,nodev,mode=700</>\n"
+	if got := format(threeRowSample); got != want {
+		t.Errorf("table mismatch\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// Every field mount printed survives into the table; only the words "on"
+// and "type" that glue the line together are gone.
+func TestFormatKeepsEveryFieldAndDropsOnlyTheGlue(t *testing.T) {
 	for name, text := range map[string]string{
-		"plain":         plainSample,
-		"read only":     readOnlySample,
-		"lone ro":       loneReadOnlySample,
-		"label":         labelSample,
-		"space in path": spaceSample,
-		"unknown fs":    unknownFsSample,
+		"plain":     plainSample,
+		"space":     spaceSample,
+		"label":     labelSample,
+		"read only": readOnlySample,
 	} {
-		if got := format(text); strip(got) != text {
-			t.Errorf("%s moved a byte:\ngot  %q\nwant %q", name, strip(got), text)
+		got := format(text)
+		// strip first: a painted value is wrapped in markers, and a
+		// read-only option is split across two of them.
+		plain := strip(got)
+		for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+			m := reMount.FindStringSubmatch(line)
+			if m == nil {
+				t.Fatalf("%s: sample row no longer parses: %q", name, line)
+			}
+			for i, field := range []string{m[1], m[2], m[3], m[4]} {
+				if !strings.Contains(plain, field) {
+					t.Errorf("%s: field %d %q missing from the table:\n%s", name, i, field, got)
+				}
+			}
 		}
+		if strings.Contains(plain, " on / type ") || strings.Contains(plain, " type btrfs ") {
+			t.Errorf("%s: the glue words survived:\n%s", name, got)
+		}
+	}
+	// A plain mount has no labels, so it must not grow a LABEL column.
+	if plain := strip(format(plainSample)); strings.Contains(plain, "LABEL") {
+		t.Errorf("a LABEL column appeared with no labels:\n%s", plain)
+	}
+	// mount -l's label gets its own column instead of hiding in the options.
+	if lab := format(labelSample); !strings.Contains(lab, "<bold>LABEL</>") || !strings.Contains(lab, "LABEL=EFI") {
+		t.Errorf("the label was not given a column:\n%s", lab)
 	}
 }
 
@@ -121,7 +168,9 @@ func TestFormatColorsFilesystemTypesByWhereTheyLive(t *testing.T) {
 	// A type this list has never heard of keeps its color: being unsure is
 	// not the same as being noise.
 	unknown := format(unknownFsSample)
-	if !strings.Contains(unknown, "type fuse.gocryptfs (") || strings.Contains(unknown, "<dim>fuse.gocryptfs") {
+	if !strings.Contains(unknown, "fuse.gocryptfs") ||
+		strings.Contains(unknown, "<dim>fuse.gocryptfs") ||
+		strings.Contains(unknown, "<cyan>fuse.gocryptfs") {
 		t.Errorf("an unknown filesystem was repainted: %q", unknown)
 	}
 }
@@ -129,14 +178,16 @@ func TestFormatColorsFilesystemTypesByWhereTheyLive(t *testing.T) {
 func TestFormatQuietensOptionsAndMarksAReadOnlyMount(t *testing.T) {
 	got := format(plainSample)
 	if !strings.Contains(got, "<dim>rw,relatime,compress=zstd:3,ssd,space_cache=v2,subvolid=295,subvol=/@</>") {
-		t.Errorf("options not quietened: %q", strings.SplitN(got, "\n", 4)[3])
+		t.Errorf("options not quietened:\n%s", got)
 	}
-	// The device and the mountpoint are the row's anchor and keep their bytes.
-	if !strings.Contains(got, "/dev/mapper/root on / type <cyan>btrfs</>") {
-		t.Errorf("the anchor moved or got painted: %q", strings.SplitN(got, "\n", 4)[3])
+	// The device and the mountpoint are the row's anchor and keep their
+	// bytes: /dev/mapper/root sits in a 16-wide column, the / in a 10-wide
+	// one, and btrfs padded to the 6-wide FSTYPE column.
+	if !strings.Contains(got, "/dev/mapper/root  /"+strings.Repeat(" ", 11)+"<cyan>btrfs</>   <dim>rw,relatime,compress=zstd:3,ssd,space_cache=v2,subvolid=295,subvol=/@</>") {
+		t.Errorf("the anchor moved or got painted:\n%s", got)
 	}
 	ro := format(readOnlySample)
-	if !strings.Contains(ro, "<yellow>ro</><dim>,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,mode=700,inode64,huge=advise</>") {
+	if !strings.Contains(ro, "<yellow>ro</><dim>,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,mode=700,inode64,huge=advise,noswap</>") {
 		t.Errorf("a read-only mount did not stand out: %q", ro)
 	}
 	// A lone `ro` is marked and nothing is dimmed after it.
@@ -146,8 +197,8 @@ func TestFormatQuietensOptionsAndMarksAReadOnlyMount(t *testing.T) {
 }
 
 func TestFormatLeavesAnUnmatchedLineAlone(t *testing.T) {
-	// An error that leaked onto stdout next to a real row: the row is
-	// painted, the error is not touched.
+	// An error that leaked onto stdout next to a real row: no table is
+	// built, the row is painted where it stands, the error is not touched.
 	text := "proc on /proc type proc (rw)\nmount: /mnt: must be superuser.\n"
 	got := format(text)
 	if !strings.Contains(got, "mount: /mnt: must be superuser.\n") {
@@ -155,5 +206,18 @@ func TestFormatLeavesAnUnmatchedLineAlone(t *testing.T) {
 	}
 	if !strings.Contains(got, "<dim>rw</>") {
 		t.Errorf("the real row was not painted: %q", got)
+	}
+	if strings.Contains(got, "<bold>DEVICE</>") {
+		t.Errorf("a table was built from mixed text: %q", got)
+	}
+}
+
+// Text with no rows at all — an empty pipe, blank lines — comes back as
+// it came in.
+func TestFormatLeavesEmptyTextAlone(t *testing.T) {
+	for _, text := range []string{"", "\n", "\n\n"} {
+		if got := format(text); got != text {
+			t.Errorf("empty text was rewritten: got %q, want %q", got, text)
+		}
 	}
 }

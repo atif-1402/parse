@@ -96,7 +96,7 @@ var toolList = []toolInfo{
 	{"find", "-ls turned into named columns instead of eleven positional fields"},
 	{"du", "sizes always carry a unit; large entries tinted"},
 	{"findmnt", "the mount tree dimmed; disk filesystems cyan, options quietened, a filling filesystem tinted"},
-	{"mount", "filesystem types colored by where they live, options quietened, a read-only mount marked"},
+	{"mount", "rows lined up as a table; filesystem types colored, options quietened, a read-only mount marked"},
 	{"free", "bare numbers get a unit; a filling machine is tinted"},
 	{"lsof", "the socket state at the end of a row colored; the heading bolded"},
 	{"ip", "addr and link collapsed per interface; route colored"},
