@@ -1,8 +1,7 @@
 // Tests for the gcc formatter: diagnostics grouped by file, summary up front,
 // file path bolded once, line:col bold, severity colored, message plain,
-// source line + caret dimmed. The verbose expansion block is condensed to
-// just the offending line and its caret. Samples are gcc and clang's own
-// output, copied as they printed them.
+// full snippet block (source, caret, expansion) dimmed underneath.
+// Samples are gcc and clang's own output, copied as they printed them.
 package gcc
 
 import (
@@ -177,19 +176,21 @@ func TestFormatBoldsLineCol(t *testing.T) {
 	}
 }
 
-func TestFormatShowsSourceAndCaretOnly(t *testing.T) {
-	got := format(gccSample)
-	// The offending source line is shown, dimmed (leading spaces preserved).
-	if !strings.Contains(got, `<dim>     printf("hello\n"</>`) {
+func TestFormatShowsFullSnippetBlock(t *testing.T) {
+	got := format(gccWarningSample)
+	// The full snippet block is shown under each diagnostic: source,
+	// caret, and expansion lines.
+	if !strings.Contains(got, `    6 |     printf("%d\n", "not an int");`) {
 		t.Errorf("source line missing:\n%s", got)
 	}
-	// The caret line is shown, dimmed (aligned under the source).
-	if !strings.Contains(got, `<dim>           ~         ^</>`) {
+	if !strings.Contains(got, `      |             ~^     ~~~~~~~~~~~~`) {
 		t.Errorf("caret line missing:\n%s", got)
 	}
-	// The expansion explanation lines (int/char *, %s) are condensed away.
-	if strings.Contains(got, "int   char *") || strings.Contains(got, "%s") {
-		t.Errorf("expansion block not condensed:\n%s", got)
+	if !strings.Contains(got, `      |              int   char *`) {
+		t.Errorf("expansion line missing:\n%s", got)
+	}
+	if !strings.Contains(got, `      |             %s`) {
+		t.Errorf("expansion line missing:\n%s", got)
 	}
 }
 
@@ -229,7 +230,7 @@ func TestFormatLeavesNonDiagnosticTextAlone(t *testing.T) {
 
 func TestFormatPrintsEveryByteBackForSingleDiag(t *testing.T) {
 	// A text with exactly one diagnostic — file, line:col, severity,
-	// message, source + caret all present.
+	// message, snippet all present.
 	text := "/home/atif/x.c:3:10: error: expected ';' before '}' token\n    3 |     return 0\n      |              ^\n"
 	got := format(text)
 	if !strings.Contains(got, "<bold>/home/atif/x.c</>") {
@@ -245,6 +246,6 @@ func TestFormatPrintsEveryByteBackForSingleDiag(t *testing.T) {
 		t.Errorf("message missing:\n%s", got)
 	}
 	if !strings.Contains(got, "<dim>") {
-		t.Errorf("source/caret not dimmed:\n%s", got)
+		t.Errorf("snippet not dimmed:\n%s", got)
 	}
 }

@@ -1,8 +1,8 @@
 // Package gcc formats gcc and clang compiler diagnostics. A compiler prints
 // one diagnostic per problem with verbose snippets and buries the count at
 // the end. parse groups diagnostics by file, puts the count summary up
-// front, paints severity by kind, and shows only the offending source line
-// with its caret instead of the full expansion block.
+// front, paints severity by kind, and shows the full snippet block — source
+// line, caret, and expansion — dimmed under each diagnostic.
 package gcc
 
 import (
@@ -31,7 +31,7 @@ var reDiag = regexp.MustCompile(`^(.+?):(\d+):(\d+):\s*(fatal error|error|warnin
 // reSnippet matches a source snippet line: `    5 |     printf("hello\n"`.
 var reSnippet = regexp.MustCompile(`^\s*\d+\s*\|`)
 
-// reCaret matches a caret pointer line: `      |           ~         ^`.
+// reCaret matches a continuation line: `      |             ~^     ~~~~~~~~~~~~`.
 var reCaret = regexp.MustCompile(`^\s*\|`)
 
 // reSummary matches the compiler's own `N errors generated.` tail line.
@@ -40,8 +40,7 @@ var reSummary = regexp.MustCompile(`^\d+ (error|warning)s? generated\.$`)
 // diag is one parsed compiler diagnostic.
 type diag struct {
 	file, line, col, sev, msg string
-	source                    string
-	caret                     string
+	snippet                   string
 }
 
 // fileBlock is one file's diagnostics, grouped under a single path.
@@ -96,8 +95,8 @@ func Detect(text string) string {
 
 // Format parses the compiler output into diagnostics grouped by file and
 // prints them: a count summary up front, then per file the path once bolded,
-// followed by line:col + colored severity + message with the dimmed source
-// line and caret. Text with no diagnostic headers passes through unchanged.
+// followed by line:col + colored severity + message with the dimmed snippet
+// block underneath. Text with no diagnostic headers passes through unchanged.
 func Format(w io.Writer, text string) {
 	lines := strings.Split(text, "\n")
 	diags := parseDiags(lines)
@@ -183,14 +182,8 @@ func writeBlocks(sb *strings.Builder, blocks []fileBlock) {
 			sb.WriteString("  ")
 			sb.WriteString(d.msg)
 			sb.WriteString("\n")
-			if d.source != "" {
-				sb.WriteString("    ")
-				sb.WriteString(tool.PaintColor(dim, d.source))
-				sb.WriteString("\n")
-			}
-			if d.caret != "" {
-				sb.WriteString("    ")
-				sb.WriteString(tool.PaintColor(dim, d.caret))
+			if d.snippet != "" {
+				sb.WriteString(tool.PaintColor(dim, strings.TrimRight(d.snippet, "\n")))
 				sb.WriteString("\n")
 			}
 		}
@@ -220,9 +213,10 @@ func sevColor(s string) string {
 }
 
 // parseDiags splits lines into diagnostic blocks. Each block starts with a
-// header matching reDiag and gathers the following source and caret lines
-// until the next header or a blank line. Expansion explanation lines are
-// skipped — only the offending source line and its caret are kept.
+// header matching reDiag and gathers the following snippet lines — source,
+// caret, and expansion — until the next header or a blank line. The `In
+// function` context line and the compiler's own `N errors generated.` tail
+// are dropped.
 func parseDiags(lines []string) []diag {
 	var out []diag
 	var cur *diag
@@ -239,12 +233,8 @@ func parseDiags(lines []string) []diag {
 				file: m[1], line: m[2], col: m[3],
 				sev: m[4], msg: m[5],
 			}
-		} else if cur != nil && reSnippet.MatchString(line) && cur.source == "" {
-			// The first snippet line is the offending source line.
-			cur.source = stripLineNo(strings.TrimRight(line, " "))
-		} else if cur != nil && reCaret.MatchString(line) && cur.caret == "" {
-			// The first caret line points at the problem.
-			cur.caret = stripLineNo(strings.TrimRight(line, " "))
+		} else if cur != nil && (reSnippet.MatchString(line) || reCaret.MatchString(line)) {
+			cur.snippet += strings.TrimRight(line, " ") + "\n"
 		} else if cur != nil && strings.TrimSpace(line) == "" {
 			flush()
 		} else if cur != nil {
@@ -253,15 +243,4 @@ func parseDiags(lines []string) []diag {
 	}
 	flush()
 	return out
-}
-
-// stripLineNo removes the `N |` prefix from a snippet line, keeping the
-// content after the pipe. Leading spaces after the pipe are preserved so
-// the caret stays aligned under the source.
-func stripLineNo(line string) string {
-	at := strings.Index(line, "|")
-	if at < 0 {
-		return line
-	}
-	return strings.TrimRight(line[at+1:], " ")
 }
