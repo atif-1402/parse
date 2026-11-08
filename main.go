@@ -27,7 +27,7 @@ Usage:
   <tool> <args> | parse    format output that is piped in
 
 Tools:
-  git systemctl journalctl ps find du findmnt free lsof ip ss lsblk kubectl docker curl
+  git systemctl journalctl ps find du findmnt mount free lsof ip ss lsblk kubectl docker curl
   (run 'parse -l' to see what parse does for each)
 
 Options:
@@ -96,6 +96,7 @@ var toolList = []toolInfo{
 	{"find", "-ls turned into named columns instead of eleven positional fields"},
 	{"du", "sizes always carry a unit; large entries tinted"},
 	{"findmnt", "the mount tree dimmed; disk filesystems cyan, options quietened, a filling filesystem tinted"},
+	{"mount", "filesystem types colored by where they live, options quietened, a read-only mount marked"},
 	{"free", "bare numbers get a unit; a filling machine is tinted"},
 	{"lsof", "the socket state at the end of a row colored; the heading bolded"},
 	{"ip", "addr and link collapsed per interface; route colored"},
@@ -221,6 +222,8 @@ func run(args []string) int {
 		return cmd.Du(rest[1:])
 	case "findmnt":
 		return cmd.Findmnt(rest[1:])
+	case "mount":
+		return cmd.Mount(rest[1:])
 	case "free":
 		return cmd.Free(rest[1:])
 	case "lsof":

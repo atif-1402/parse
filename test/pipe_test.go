@@ -1120,3 +1120,39 @@ func TestCurlBareErrorIsClaimedInThePipe(t *testing.T) {
 		t.Errorf("bare curl error missing %q:\n%q", want, got)
 	}
 }
+
+// mount's rows are claimed by their shape: the filesystem type gets its
+// color and the options are quietened, with a read-only mount marked.
+func TestMountRowsAreClaimedInThePipe(t *testing.T) {
+	got := throughCmd(lines(
+		`proc on /proc type proc (rw,nosuid,nodev,noexec,relatime)`,
+		`/dev/mapper/root on / type btrfs (rw,relatime,compress=zstd:3,ssd)`,
+		`none on /run/credentials/x.service type tmpfs (ro,nosuid,nodev,mode=700)`,
+	))
+	for _, want := range []string{
+		"<dim>proc</>",
+		"<cyan>btrfs</>",
+		"<dim>rw,nosuid,nodev,noexec,relatime</>",
+		"<yellow>ro</><dim>,nosuid,nodev,mode=700</>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("mount output missing %q:\n%q", want, got)
+		}
+	}
+	// The anchor keeps its bytes.
+	if !strings.Contains(got, "/dev/mapper/root on / type <cyan>btrfs</>") {
+		t.Errorf("the mountpoint moved or got painted:\n%q", got)
+	}
+}
+
+// Tables that sit next to mount on a user's screen but are not mount's:
+// df's heading is spelled in lower case with no " type " anywhere, and a
+// mountpoint report is prose. Neither may be claimed.
+func TestMountLeavesNeighbourOutputAlone(t *testing.T) {
+	passthrough(t, "df", lines(
+		"Filesystem        1K-blocks      Used Available Use% Mounted on",
+		"/dev/nvme0n1p1     104857600  69106800  35750800  66% /",
+	))
+	passthrough(t, "mountpoint", "/proc is a mountpoint\n")
+	passthrough(t, "findmnt raw", "/dev/sda1 /mnt ext4 rw,relatime 0 0\n")
+}

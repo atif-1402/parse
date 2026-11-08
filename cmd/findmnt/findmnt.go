@@ -19,7 +19,6 @@ import (
 const (
 	red    = tool.Red
 	yellow = tool.Yellow
-	cyan   = tool.Cyan
 	dim    = tool.Dim
 )
 
@@ -352,7 +351,7 @@ func cellMarks(name string, start int, text string, columns int) []mark {
 			return []mark{{start, start + end, dim}}
 		}
 	case name == "FSTYPE":
-		if color := fsColor(text); color != "" {
+		if color := tool.FsColor(text); color != "" {
 			return []mark{{start, start + len([]rune(text)), color}}
 		}
 	case strings.HasSuffix(name, "OPTIONS") && columns > 1:
@@ -391,25 +390,6 @@ func treeEnd(s string) int {
 		}
 	}
 	return at
-}
-
-// fsColor names a filesystem by where its data lives: a type backed by a disk
-// is cyan, the kernel's own plumbing is dim, and anything else — a network
-// share, an overlay, a type this list has never heard of — keeps its color,
-// because being unsure is not the same as being noise.
-func fsColor(s string) string {
-	switch s {
-	case "btrfs", "ext2", "ext3", "ext4", "f2fs", "xfs", "zfs", "bcachefs",
-		"vfat", "exfat", "ntfs", "ntfs3", "reiserfs", "jfs", "nilfs2",
-		"hfs", "hfsplus", "minix", "udf", "iso9660", "squashfs", "erofs":
-		return cyan
-	case "proc", "sysfs", "devtmpfs", "devpts", "ramfs", "tmpfs", "cgroup",
-		"cgroup2", "securityfs", "debugfs", "tracefs", "pstore", "bpf",
-		"configfs", "fusectl", "autofs", "binfmt_misc", "mqueue", "hugetlbfs",
-		"efivarfs", "binderfs", "nsfs", "rpc_pipefs", "selinuxfs":
-		return dim
-	}
-	return ""
 }
 
 // percentColor is how full a filesystem is, at the thresholds `parse free`

@@ -24,6 +24,7 @@ import (
 	"github.com/atif-1402/parse/cmd/kubectl"
 	"github.com/atif-1402/parse/cmd/lsblk"
 	"github.com/atif-1402/parse/cmd/lsof"
+	"github.com/atif-1402/parse/cmd/mount"
 	"github.com/atif-1402/parse/cmd/ps"
 	"github.com/atif-1402/parse/cmd/ss"
 	"github.com/atif-1402/parse/cmd/systemctl"
@@ -65,6 +66,9 @@ func Find(args []string) int { return find.Run(args) }
 
 // Findmnt implements `parse findmnt <args>`.
 func Findmnt(args []string) int { return findmnt.Run(args) }
+
+// Mount implements `parse mount <args>`.
+func Mount(args []string) int { return mount.Run(args) }
 
 // Du implements `parse du <args>`.
 func Du(args []string) int { return du.Run(args) }
@@ -275,6 +279,10 @@ var detectors = []detector{
 	// parse knows prints in capitals — and `df` is the one table a user pipes
 	// next to it, spelled in lower case.
 	{tool: "findmnt", detect: findmnt.Detect, format: func(w io.Writer, sub, text string) { findmnt.Format(w, text) }},
+	// mount's rows have no heading at all: `device on /path type fs
+	// (options)` is a shape no table, log or JSON parse knows prints, and
+	// findmnt's own rows are space-padded columns with none of those words.
+	{tool: "mount", detect: mount.Detect, format: func(w io.Writer, sub, text string) { mount.Format(w, text) }},
 	// docker's ps heading opens with a "CONTAINER ID" column, two words in one
 	// cell, which no other table parse knows begins with; its inspect JSON is
 	// recognized by keys only docker prints.

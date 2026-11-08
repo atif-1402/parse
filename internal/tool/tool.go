@@ -48,6 +48,28 @@ func PaintColor(color, s string) string {
 	return Paint(color, s)
 }
 
+// FsColor names a filesystem by where its data lives: a type backed by a disk
+// is cyan, the kernel's own plumbing is dim, and anything else — a network
+// share, an overlay, a type this list has never heard of — keeps its color,
+// because being unsure is not the same as being noise.
+//
+// It lives here so the findmnt and mount formatters share one list instead of
+// drifting apart about what counts as plumbing.
+func FsColor(s string) string {
+	switch s {
+	case "btrfs", "ext2", "ext3", "ext4", "f2fs", "xfs", "zfs", "bcachefs",
+		"vfat", "exfat", "ntfs", "ntfs3", "reiserfs", "jfs", "nilfs2",
+		"hfs", "hfsplus", "minix", "udf", "iso9660", "squashfs", "erofs":
+		return Cyan
+	case "proc", "sysfs", "devtmpfs", "devpts", "ramfs", "tmpfs", "cgroup",
+		"cgroup2", "securityfs", "debugfs", "tracefs", "pstore", "bpf",
+		"configfs", "fusectl", "autofs", "binfmt_misc", "mqueue", "hugetlbfs",
+		"efivarfs", "binderfs", "nsfs", "rpc_pipefs", "selinuxfs":
+		return Dim
+	}
+	return ""
+}
+
 var reANSI = regexp.MustCompile("\x1b\\[[0-9;?]*[A-Za-z]")
 
 // StripANSI removes any color codes a tool already printed, so parse does not
