@@ -18,6 +18,7 @@ import (
 	"github.com/atif-1402/parse/cmd/find"
 	"github.com/atif-1402/parse/cmd/findmnt"
 	"github.com/atif-1402/parse/cmd/free"
+	"github.com/atif-1402/parse/cmd/gcc"
 	"github.com/atif-1402/parse/cmd/git"
 	"github.com/atif-1402/parse/cmd/ip"
 	"github.com/atif-1402/parse/cmd/journalctl"
@@ -69,6 +70,9 @@ func Findmnt(args []string) int { return findmnt.Run(args) }
 
 // Mount implements `parse mount <args>`.
 func Mount(args []string) int { return mount.Run(args) }
+
+// Gcc implements `parse gcc <args>` and `parse clang <args>`.
+func Gcc(bin string, args []string) int { return gcc.Run(bin, args) }
 
 // Du implements `parse du <args>`.
 func Du(args []string) int { return du.Run(args) }
@@ -283,6 +287,9 @@ var detectors = []detector{
 	// (options)` is a shape no table, log or JSON parse knows prints, and
 	// findmnt's own rows are space-padded columns with none of those words.
 	{tool: "mount", detect: mount.Detect, format: func(w io.Writer, sub, text string) { mount.Format(w, text) }},
+	// gcc and clang diagnostics open with `file:line:col: severity: message`,
+	// a shape no other tool prints; clang's `remark:` is covered too.
+	{tool: "gcc", detect: gcc.Detect, format: func(w io.Writer, sub, text string) { gcc.Format(w, text) }},
 	// docker's ps heading opens with a "CONTAINER ID" column, two words in one
 	// cell, which no other table parse knows begins with; its inspect JSON is
 	// recognized by keys only docker prints.

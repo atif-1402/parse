@@ -1164,3 +1164,39 @@ func TestMountLeavesNeighbourOutputAlone(t *testing.T) {
 	passthrough(t, "mountpoint", "/proc is a mountpoint\n")
 	passthrough(t, "findmnt raw", "/dev/sda1 /mnt ext4 rw,relatime 0 0\n")
 }
+
+// gcc and clang diagnostics are claimed by their header shape: the severity
+// is colored and the source snippets are dimmed.
+func TestGccDiagnosticsAreClaimedInThePipe(t *testing.T) {
+	got := throughCmd(lines(
+		`/home/atif/x.c:5:21: error: expected ')' before 'return'`,
+		`    5 |     printf("hello\n"`,
+		`      |           ~         ^`,
+	))
+	for _, want := range []string{
+		"<bold>/home/atif/x.c:5:21</>",
+		"<red>error</>",
+		"<dim>    5 |     printf(\"hello\\n\"</>",
+		"<dim>      |           ~         ^</>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("gcc output missing %q:\n%q", want, got)
+		}
+	}
+}
+
+// A lone error line with no context is still a diagnostic.
+func TestGccSingleLineIsClaimed(t *testing.T) {
+	got := throughCmd("/home/atif/x.c:3:10: warning: unused variable 'x' [-Wunused-variable]\n")
+	if !strings.Contains(got, "<bold>/home/atif/x.c:3:10</>") ||
+		!strings.Contains(got, "<yellow>warning</>") {
+		t.Errorf("single-line diagnostic not painted:\n%q", got)
+	}
+}
+
+// Tables and logs that sit next to compiler output are not claimed by gcc.
+func TestGccLeavesNeighbourOutputAlone(t *testing.T) {
+	passthrough(t, "make echo", "make: Entering directory '/home/atif/x'\n")
+	passthrough(t, "log line", "[2026-11-08] build started\n")
+	passthrough(t, "random text", "syntax-error.c:5: not a diagnostic\n")
+}

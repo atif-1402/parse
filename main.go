@@ -27,7 +27,7 @@ Usage:
   <tool> <args> | parse    format output that is piped in
 
 Tools:
-  git systemctl journalctl ps find du findmnt mount free lsof ip ss lsblk kubectl docker curl
+  git systemctl journalctl ps find du findmnt mount gcc clang free lsof ip ss lsblk kubectl docker curl
   (run 'parse -l' to see what parse does for each)
 
 Options:
@@ -96,7 +96,9 @@ var toolList = []toolInfo{
 	{"find", "-ls turned into named columns instead of eleven positional fields"},
 	{"du", "sizes always carry a unit; large entries tinted"},
 	{"findmnt", "the mount tree dimmed; disk filesystems cyan, options quietened, a filling filesystem tinted"},
-	{"mount", "rows lined up as a table; filesystem types colored, options quietened, a read-only mount marked"},
+	{"mount", "rows lined up as a table: filesystem types colored, options quietened, a read-only mount marked"},
+	{"gcc", "error/warning/note headers colored, source snippets and context dimmed; works for clang too"},
+	{"clang", "error/warning/note headers colored, source snippets and context dimmed; works for gcc too"},
 	{"free", "bare numbers get a unit; a filling machine is tinted"},
 	{"lsof", "the socket state at the end of a row colored; the heading bolded"},
 	{"ip", "addr and link collapsed per interface; route colored"},
@@ -224,6 +226,10 @@ func run(args []string) int {
 		return cmd.Findmnt(rest[1:])
 	case "mount":
 		return cmd.Mount(rest[1:])
+	case "gcc":
+		return cmd.Gcc("gcc", rest[1:])
+	case "clang":
+		return cmd.Gcc("clang", rest[1:])
 	case "free":
 		return cmd.Free(rest[1:])
 	case "lsof":
