@@ -30,7 +30,7 @@
 </p>
 
 <p align="center">
-  <b>Status: v0.2.6.</b> Feedback and bug reports welcome. <a href="#reporting-bugs">See reporting bugs</a>.
+  <b>Status: v0.2.7.</b> Feedback and bug reports welcome. <a href="#reporting-bugs">See reporting bugs</a>.
 </p>
 
 ```
