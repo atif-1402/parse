@@ -111,6 +111,7 @@ Run `parse -l` to see every supported command and what it changes, or `parse -h`
 | **find** | `-ls` turned into named columns |
 | **du** | sizes always carry a unit, large entries tinted |
 | **findmnt** | mount tree dimmed, filling filesystems tinted |
+| **mount** | filesystem types colored by where they live, options quietened, a read-only mount marked |
 | **free** | bare numbers get a unit, a filling machine is tinted |
 | **lsof** | socket state colored, heading bolded |
 | **ip** | `addr` / `link` collapsed per interface, `route` colored |
