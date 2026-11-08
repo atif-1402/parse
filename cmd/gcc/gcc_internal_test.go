@@ -1,6 +1,7 @@
-// Tests for the gcc formatter: the diagnostic header shape, the colors it
-// gets, and the lines it dims. Samples are gcc and clang's own output,
-// copied as they printed them.
+// Tests for the gcc formatter: the summary goes up front, the file:line:col
+// anchor is bold, the severity is colored, and the source snippets are dimmed.
+// This is a reformation — the output is restructured, not byte-for-byte.
+// Samples are gcc and clang's own output, copied as they printed them.
 package gcc
 
 import (
@@ -20,15 +21,6 @@ func init() {
 	}
 }
 
-// strip takes the test's color markers back out, so a formatted line can be
-// held against the line it came from.
-func strip(s string) string {
-	for _, tag := range []string{"<bold>", "<dim>", "<red>", "<green>", "<yellow>", "<cyan>", "</>"} {
-		s = strings.ReplaceAll(s, tag, "")
-	}
-	return s
-}
-
 func format(text string) string {
 	var buf bytes.Buffer
 	Format(&buf, text)
@@ -41,7 +33,7 @@ const gccSample = `/home/atif/testing/gcc-test/syntax-error.c: In function 'main
       |           ~         ^
       |                     )
     6 |     return 0;
-      |     ~~~~~~           
+      |     ~~~~~~          
 /home/atif/testing/gcc-test/syntax-error.c:6:14: error: expected ';' before '}' token
     6 |     return 0;
       |              ^
@@ -104,6 +96,7 @@ func TestDetectClaimsDiagnosticHeaders(t *testing.T) {
 func TestDetectLeavesOtherOutputAlone(t *testing.T) {
 	for name, text := range map[string]string{
 		"make echo": "make: Entering directory '/home/atif/testing/gcc-test'\n",
+		"make run":  "cc syntax-error.c -o syntax-error\n",
 		"prose":     "syntax-error.c:5: not a diagnostic\n",
 		// A file:line without a severity keyword is not a diagnostic header.
 		"no severity": "/home/atif/x.c:5:10: \n",
@@ -116,27 +109,28 @@ func TestDetectLeavesOtherOutputAlone(t *testing.T) {
 	}
 }
 
-func TestFormatPaintsDiagnosticHeaders(t *testing.T) {
+func TestFormatPrintsSummaryUpFront(t *testing.T) {
 	got := format(gccSample)
-	// The file:line:col anchor is bold; the severity is colored.
-	for _, want := range []string{
-		"<bold>/home/atif/testing/gcc-test/syntax-error.c:5:21</>",
-		"<red>error</>",
-		"<bold>/home/atif/testing/gcc-test/syntax-error.c:6:14</>",
-		"<red>error</>",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("missing %q:\n%s", want, got)
-		}
+	if !strings.Contains(got, "2 errors, 0 warnings") {
+		t.Errorf("summary missing:\n%s", got)
 	}
-	// The message after the severity stays plain.
-	if !strings.Contains(got, "<red>error</>: expected ')' before 'return'") {
-		t.Errorf("message was repainted:\n%s", got)
+	// Notes don't count as errors or warnings.
+	note := format(clangErrorSample)
+	if !strings.Contains(note, "1 error, 0 warnings") {
+		t.Errorf("clang summary missing:\n%s", note)
+	}
+	// The compiler's own `N errors generated.` tail is replaced by our summary.
+	if strings.Contains(got, "errors generated.") {
+		t.Errorf("compiler's tail summary should not appear:\n%s", got)
 	}
 }
 
-func TestFormatColorsWarningsAndNotes(t *testing.T) {
-	got := format(gccWarningSample)
+func TestFormatColorsSeverities(t *testing.T) {
+	got := format(gccSample)
+	if !strings.Contains(got, "<red>error</>") {
+		t.Errorf("error not red:\n%s", got)
+	}
+	got = format(gccWarningSample)
 	if !strings.Contains(got, "<yellow>warning</>") {
 		t.Errorf("warning not yellow:\n%s", got)
 	}
@@ -146,13 +140,11 @@ func TestFormatColorsWarningsAndNotes(t *testing.T) {
 	}
 }
 
-func TestFormatDimsSnippetsAndContext(t *testing.T) {
+func TestFormatBoldsFileLineCol(t *testing.T) {
 	got := format(gccSample)
-	// Source snippets and caret lines are dimmed; context lines too.
 	for _, want := range []string{
-		"<dim>    5 |     printf(\"hello\\n\"</>",
-		"<dim>      |           ~         ^</>",
-		"<dim>/home/atif/testing/gcc-test/syntax-error.c: In function 'main':</>",
+		"<bold>/home/atif/testing/gcc-test/syntax-error.c:5:21</>",
+		"<bold>/home/atif/testing/gcc-test/syntax-error.c:6:14</>",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q:\n%s", want, got)
@@ -160,41 +152,78 @@ func TestFormatDimsSnippetsAndContext(t *testing.T) {
 	}
 }
 
-func TestFormatDimsSummary(t *testing.T) {
-	got := format(clangSample)
-	if !strings.Contains(got, "<dim>2 warnings generated.</>") {
-		t.Errorf("summary not dimmed:\n%s", got)
+func TestFormatDimsSnippets(t *testing.T) {
+	got := format(gccSample)
+	if !strings.Contains(got, "<dim>") {
+		t.Errorf("snippets not dimmed:\n%s", got)
+	}
+	// The snippet content survives inside the dim tag.
+	if !strings.Contains(got, `printf("hello\n"`) {
+		t.Errorf("snippet content missing:\n%s", got)
+	}
+	if !strings.Contains(got, `return 0;`) {
+		t.Errorf("second snippet missing:\n%s", got)
 	}
 }
 
-func TestFormatPrintsEveryByteBack(t *testing.T) {
-	for name, text := range map[string]string{
-		"gcc error":   gccSample,
-		"gcc warning": gccWarningSample,
-		"clang":       clangSample,
-		"clang note":  clangErrorSample,
-		"linker":      linkerSample,
-	} {
-		if got := format(text); strip(got) != text {
-			t.Errorf("%s moved a byte:\ngot  %q\nwant %q", name, strip(got), text)
-		}
+func TestFormatDropsInFunctionContext(t *testing.T) {
+	got := format(gccSample)
+	if strings.Contains(got, "In function") {
+		t.Errorf("In function context should not appear — file:line:col is enough:\n%s", got)
 	}
 }
 
-func TestFormatLeavesNonDiagnosticLinesAlone(t *testing.T) {
-	// A make command echo mixed with a diagnostic: the echo passes through,
-	// only the diagnostic header gets painted.
-	text := "cc syntax-error.c -o syntax-error\n" + gccSample
-	got := format(text)
-	if !strings.Contains(got, "cc syntax-error.c -o syntax-error") {
-		t.Errorf("command echo was repainted:\n%s", got)
+func TestFormatKeepsMessagePlain(t *testing.T) {
+	got := format(gccSample)
+	if !strings.Contains(got, "<red>error</>  expected ')' before 'return'") {
+		t.Errorf("message not plain after severity:\n%s", got)
 	}
-	if !strings.Contains(got, "<red>error</>") {
-		t.Errorf("diagnostic was not painted:\n%s", got)
+	got = format(gccWarningSample)
+	if !strings.Contains(got, "<yellow>warning</>  format '%d' expects argument of type 'int'") {
+		t.Errorf("warning message not plain:\n%s", got)
 	}
-	// make's own error lines are not diagnostics.
+}
+
+func TestFormatLeavesNonDiagnosticTextAlone(t *testing.T) {
+	// make's own error lines.
 	makeErr := "make: *** [Makefile:10: syntax] Error 1\n"
 	if got := format(makeErr); got != makeErr {
 		t.Errorf("make error was repainted:\n%s", got)
+	}
+	// A bare file:line without severity is not a diagnostic.
+	if got := format("syntax-error.c:5: not a diagnostic\n"); got != "syntax-error.c:5: not a diagnostic\n" {
+		t.Errorf("prose was repainted:\n%s", got)
+	}
+	// Linker output doesn't match the diagnostic header shape.
+	if got := format(linkerSample); got != linkerSample {
+		t.Errorf("linker output was reformatted:\n%s", got)
+	}
+	// Diagnostics are still extracted when mixed with a command echo.
+	text := "cc syntax-error.c -o syntax-error\n" + gccSample
+	got := format(text)
+	if !strings.Contains(got, "2 errors, 0 warnings") {
+		t.Errorf("summary missing from mixed text:\n%s", got)
+	}
+	if strings.Contains(got, "cc syntax-error.c -o syntax-error") {
+		t.Errorf("command echo should be dropped:\n%s", got)
+	}
+}
+
+func TestFormatPrintsEveryByteBackForSingleDiag(t *testing.T) {
+	// A text with exactly one diagnostic and no context lines — every
+	// byte that matters survives: file:line:col, severity, message, snippet.
+	text := "/home/atif/x.c:3:10: error: expected ';' before '}' token\n    3 |     return 0\n      |              ^\n"
+	got := format(text)
+	if !strings.Contains(got, "<bold>/home/atif/x.c:3:10</>") {
+		t.Errorf("file:line:col not bold:\n%s", got)
+	}
+	if !strings.Contains(got, "<red>error</>") {
+		t.Errorf("error not red:\n%s", got)
+	}
+	if !strings.Contains(got, "expected ';' before '}' token") {
+		t.Errorf("message missing:\n%s", got)
+	}
+	if !strings.Contains(got, "<dim>") {
+		t.Errorf("snippet not dimmed:\n%s", got)
 	}
 }
