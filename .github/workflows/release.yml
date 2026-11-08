@@ -30,6 +30,6 @@ jobs:
 
       - name: Attach to release
         run: |
-          gh release upload "${{ github.ref_name }}" parse
+          gh release upload "${{ github.ref_name }}" parse --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
