@@ -1166,7 +1166,8 @@ func TestMountLeavesNeighbourOutputAlone(t *testing.T) {
 }
 
 // gcc diagnostics are claimed by their header shape and reformatted:
-// a summary line up front, bold file:line:col, colored severity, dimmed snippets.
+// a summary line up front, file path bolded once, line:col bold, severity
+// colored, snippets dimmed.
 func TestGccDiagnosticsAreClaimedInThePipe(t *testing.T) {
 	got := throughCmd(lines(
 		`/home/atif/x.c:5:21: error: expected ')' before 'return'`,
@@ -1174,8 +1175,9 @@ func TestGccDiagnosticsAreClaimedInThePipe(t *testing.T) {
 		`      |           ~         ^`,
 	))
 	for _, want := range []string{
-		"1 error, 0 warnings",
-		"<bold>/home/atif/x.c:5:21</>",
+		"1 error",
+		"<bold>/home/atif/x.c</>",
+		"<bold>5:21</>",
 		"<red>error</>",
 		"<dim>",
 	} {

@@ -1,10 +1,8 @@
 // Package gcc formats gcc and clang compiler diagnostics. A compiler prints
-// one diagnostic per problem — header, source snippets, carets — and buries
-// the error count at the end. parse groups each diagnostic under its
-// file:line:col, paints the severity, puts the count summary up front, and
-// dims the snippets so the actual problem stands out. This is a
-// reformation, not a recoloring: gcc already colors its own output when it
-// sees a terminal; parse changes the shape of it.
+// one diagnostic per problem, each with a header, source snippets and carets,
+// and buries the error count at the end. parse groups diagnostics by file,
+// puts the count summary up front, paints severity by kind, dims the snippets,
+// and aligns the messages so problems are scannable instead of scattered.
 package gcc
 
 import (
@@ -43,6 +41,14 @@ var reSummary = regexp.MustCompile(`^\d+ (error|warning)s? generated\.$`)
 type diag struct {
 	file, line, col, sev, msg string
 	snippet                   string
+}
+
+// fileBlock is one file's diagnostics, grouped under a single path.
+type fileBlock struct {
+	file  string
+	diags []diag
+	errs  int
+	warns int
 }
 
 // Run implements `parse gcc <args>` and `parse clang <args>`.
@@ -87,11 +93,10 @@ func Detect(text string) string {
 	return ""
 }
 
-// Format parses the compiler output into diagnostics and prints them as a
-// grouped list: a summary line up front (compilers hide it at the bottom),
-// then each diagnostic with its location, colored severity, message, and the
-// dimmed source snippet below. Text with no diagnostic headers passes
-// through unchanged.
+// Format parses the compiler output into diagnostics grouped by file and
+// prints them: a count summary up front, then per file the path once bolded,
+// followed by line:col + colored severity + message with dimmed snippets.
+// Text with no diagnostic headers passes through unchanged.
 func Format(w io.Writer, text string) {
 	lines := strings.Split(text, "\n")
 	diags := parseDiags(lines)
@@ -100,35 +105,111 @@ func Format(w io.Writer, text string) {
 		return
 	}
 
-	var sb strings.Builder
+	blocks := groupByFile(diags)
 	errs, warns := 0, 0
+	for _, b := range blocks {
+		errs += b.errs
+		warns += b.warns
+	}
+
+	var sb strings.Builder
+	sb.WriteString(summary(errs, warns))
+	sb.WriteString("\n")
+	writeBlocks(&sb, blocks)
+	io.WriteString(w, sb.String())
+}
+
+// summary prints the count summary, omitting zero counts so "2 errors"
+// reads better than "2 errors, 0 warnings".
+func summary(errs, warns int) string {
+	parts := []string{}
+	if errs > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", errs, plural(errs, "error")))
+	}
+	if warns > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", warns, plural(warns, "warning")))
+	}
+	if len(parts) == 0 {
+		return "0 problems"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// groupByFile groups diagnostics by file path, preserving order.
+func groupByFile(diags []diag) []fileBlock {
+	index := map[string]int{}
+	blocks := []fileBlock{}
 	for _, d := range diags {
-		switch d.sev {
-		case "error", "fatal error":
-			errs++
-		case "warning":
-			warns++
+		if i, ok := index[d.file]; ok {
+			b := &blocks[i]
+			b.diags = append(b.diags, d)
+			switch d.sev {
+			case "error", "fatal error":
+				b.errs++
+			case "warning":
+				b.warns++
+			}
+		} else {
+			index[d.file] = len(blocks)
+			var b fileBlock
+			b.file = d.file
+			b.diags = []diag{d}
+			switch d.sev {
+			case "error", "fatal error":
+				b.errs = 1
+			case "warning":
+				b.warns = 1
+			}
+			blocks = append(blocks, b)
 		}
 	}
-	fmt.Fprintf(&sb, "%d %s, %d %s\n", errs, plural(errs, "error"), warns, plural(warns, "warning"))
-	sb.WriteString(strings.Repeat("─", 45) + "\n")
+	return blocks
+}
 
-	for i, d := range diags {
+// writeBlocks writes one file block per file, grouped under a bold path.
+func writeBlocks(sb *strings.Builder, blocks []fileBlock) {
+	for i, b := range blocks {
 		if i > 0 {
 			sb.WriteString("\n")
 		}
-		sb.WriteString(tool.PaintColor(bold, d.file+":"+d.line+":"+d.col))
-		sb.WriteString("  ")
-		sb.WriteString(tool.PaintColor(sevColor(d.sev), d.sev))
-		sb.WriteString("  ")
-		sb.WriteString(d.msg)
+		sb.WriteString(tool.PaintColor(bold, b.file))
 		sb.WriteString("\n")
-		if d.snippet != "" {
-			sb.WriteString(tool.PaintColor(dim, strings.TrimRight(d.snippet, "\n")))
+		for _, d := range b.diags {
+			sb.WriteString("  ")
+			sb.WriteString(tool.PaintColor(bold, d.line+":"+d.col))
+			sb.WriteString("  ")
+			sb.WriteString(tool.PaintColor(sevColor(d.sev), d.sev))
+			sb.WriteString("  ")
+			sb.WriteString(d.msg)
 			sb.WriteString("\n")
+			if d.snippet != "" {
+				sb.WriteString(tool.PaintColor(dim, strings.TrimRight(d.snippet, "\n")))
+				sb.WriteString("\n")
+			}
 		}
 	}
-	io.WriteString(w, sb.String())
+}
+
+// plural returns word or word+"s" depending on n.
+func plural(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
+}
+
+// sevColor returns the paint color for a severity keyword.
+func sevColor(s string) string {
+	switch s {
+	case "error", "fatal error":
+		return red
+	case "warning":
+		return yellow
+	case "note", "remark":
+		return cyan
+	default:
+		return ""
+	}
 }
 
 // parseDiags splits lines into diagnostic blocks. Each block starts with a
@@ -160,26 +241,4 @@ func parseDiags(lines []string) []diag {
 	}
 	flush()
 	return out
-}
-
-// plural returns word or word+"s" depending on n.
-func plural(n int, word string) string {
-	if n == 1 {
-		return word
-	}
-	return word + "s"
-}
-
-// sevColor returns the paint color for a severity keyword.
-func sevColor(s string) string {
-	switch s {
-	case "error", "fatal error":
-		return red
-	case "warning":
-		return yellow
-	case "note", "remark":
-		return cyan
-	default:
-		return ""
-	}
 }

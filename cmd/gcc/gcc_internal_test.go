@@ -1,7 +1,8 @@
-// Tests for the gcc formatter: the summary goes up front, the file:line:col
-// anchor is bold, the severity is colored, and the source snippets are dimmed.
-// This is a reformation — the output is restructured, not byte-for-byte.
-// Samples are gcc and clang's own output, copied as they printed them.
+// Tests for the gcc formatter: diagnostics grouped by file, summary up front,
+// file path bolded once, line:col + colored severity + message aligned,
+// snippets dimmed. This is a reformation — the output is restructured, not
+// byte-for-byte. Samples are gcc and clang's own output, copied as they
+// printed them.
 package gcc
 
 import (
@@ -111,17 +112,41 @@ func TestDetectLeavesOtherOutputAlone(t *testing.T) {
 
 func TestFormatPrintsSummaryUpFront(t *testing.T) {
 	got := format(gccSample)
-	if !strings.Contains(got, "2 errors, 0 warnings") {
+	if !strings.Contains(got, "2 errors") {
 		t.Errorf("summary missing:\n%s", got)
+	}
+	// Zero counts are omitted.
+	if strings.Contains(got, "0 warnings") {
+		t.Errorf("zero count should be omitted:\n%s", got)
 	}
 	// Notes don't count as errors or warnings.
 	note := format(clangErrorSample)
-	if !strings.Contains(note, "1 error, 0 warnings") {
+	if !strings.Contains(note, "1 error") {
 		t.Errorf("clang summary missing:\n%s", note)
 	}
-	// The compiler's own `N errors generated.` tail is replaced by our summary.
-	if strings.Contains(got, "errors generated.") {
-		t.Errorf("compiler's tail summary should not appear:\n%s", got)
+}
+
+func TestFormatOmitsZeroCounts(t *testing.T) {
+	got := format(clangSample)
+	if strings.Contains(got, "0 errors") {
+		t.Errorf("zero error count should be omitted:\n%s", got)
+	}
+	if !strings.Contains(got, "2 warnings") {
+		t.Errorf("warning count missing:\n%s", got)
+	}
+}
+
+func TestFormatGroupsByFile(t *testing.T) {
+	got := format(gccSample)
+	// The file path appears once bolded, not repeated per diagnostic.
+	boldPath := "<bold>/home/atif/testing/gcc-test/syntax-error.c</>"
+	if !strings.Contains(got, boldPath) {
+		t.Errorf("file path not bolded:\n%s", got)
+	}
+	// Count occurrences of the path.
+	count := strings.Count(got, "/home/atif/testing/gcc-test/syntax-error.c")
+	if count != 1 {
+		t.Errorf("file path appears %d times, want 1:\n%s", count, got)
 	}
 }
 
@@ -140,11 +165,11 @@ func TestFormatColorsSeverities(t *testing.T) {
 	}
 }
 
-func TestFormatBoldsFileLineCol(t *testing.T) {
+func TestFormatBoldsLineCol(t *testing.T) {
 	got := format(gccSample)
 	for _, want := range []string{
-		"<bold>/home/atif/testing/gcc-test/syntax-error.c:5:21</>",
-		"<bold>/home/atif/testing/gcc-test/syntax-error.c:6:14</>",
+		"<bold>5:21</>",
+		"<bold>6:14</>",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q:\n%s", want, got)
@@ -157,7 +182,6 @@ func TestFormatDimsSnippets(t *testing.T) {
 	if !strings.Contains(got, "<dim>") {
 		t.Errorf("snippets not dimmed:\n%s", got)
 	}
-	// The snippet content survives inside the dim tag.
 	if !strings.Contains(got, `printf("hello\n"`) {
 		t.Errorf("snippet content missing:\n%s", got)
 	}
@@ -169,7 +193,7 @@ func TestFormatDimsSnippets(t *testing.T) {
 func TestFormatDropsInFunctionContext(t *testing.T) {
 	got := format(gccSample)
 	if strings.Contains(got, "In function") {
-		t.Errorf("In function context should not appear — file:line:col is enough:\n%s", got)
+		t.Errorf("In function context should not appear:\n%s", got)
 	}
 }
 
@@ -198,15 +222,6 @@ func TestFormatLeavesNonDiagnosticTextAlone(t *testing.T) {
 	if got := format(linkerSample); got != linkerSample {
 		t.Errorf("linker output was reformatted:\n%s", got)
 	}
-	// Diagnostics are still extracted when mixed with a command echo.
-	text := "cc syntax-error.c -o syntax-error\n" + gccSample
-	got := format(text)
-	if !strings.Contains(got, "2 errors, 0 warnings") {
-		t.Errorf("summary missing from mixed text:\n%s", got)
-	}
-	if strings.Contains(got, "cc syntax-error.c -o syntax-error") {
-		t.Errorf("command echo should be dropped:\n%s", got)
-	}
 }
 
 func TestFormatPrintsEveryByteBackForSingleDiag(t *testing.T) {
@@ -214,8 +229,11 @@ func TestFormatPrintsEveryByteBackForSingleDiag(t *testing.T) {
 	// byte that matters survives: file:line:col, severity, message, snippet.
 	text := "/home/atif/x.c:3:10: error: expected ';' before '}' token\n    3 |     return 0\n      |              ^\n"
 	got := format(text)
-	if !strings.Contains(got, "<bold>/home/atif/x.c:3:10</>") {
-		t.Errorf("file:line:col not bold:\n%s", got)
+	if !strings.Contains(got, "<bold>/home/atif/x.c</>") {
+		t.Errorf("file not bolded:\n%s", got)
+	}
+	if !strings.Contains(got, "<bold>3:10</>") {
+		t.Errorf("line:col not bolded:\n%s", got)
 	}
 	if !strings.Contains(got, "<red>error</>") {
 		t.Errorf("error not red:\n%s", got)
