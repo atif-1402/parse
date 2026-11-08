@@ -112,6 +112,8 @@ Run `parse -l` to see every supported command and what it changes, or `parse -h`
 | **du** | sizes always carry a unit, large entries tinted |
 | **findmnt** | mount tree dimmed, filling filesystems tinted |
 | **mount** | rows lined up as a table: filesystem types colored, options quietened, a read-only mount marked |
+| **gcc** | `error`/`warning`/`note` headers colored, source snippets and context dimmed |
+| **clang** | `error`/`warning`/`note` headers colored, source snippets and context dimmed |
 | **free** | bare numbers get a unit, a filling machine is tinted |
 | **lsof** | socket state colored, heading bolded |
 | **ip** | `addr` / `link` collapsed per interface, `route` colored |
